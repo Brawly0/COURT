@@ -11,3 +11,6 @@ game/obj/
 game/*.slnx
 game/*.csproj
 game/.vsconfig
+
+.obsidian/
+game/Build/
