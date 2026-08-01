@@ -4,6 +4,8 @@ using Unity.Netcode.Transports.UTP;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using CaseClosed.Game;
 
 namespace CaseClosed.EditorTools
@@ -29,6 +31,7 @@ namespace CaseClosed.EditorTools
                 var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
                 GrayboxBuilder.Build();
+                BuildPostFx();
                 var playerPrefab = BuildPlayerPrefab();
                 BuildNetwork(playerPrefab);
                 BuildGameSystems(playerPrefab);
@@ -49,6 +52,34 @@ namespace CaseClosed.EditorTools
                 Debug.LogError("[CaseClosed] Scene build FAILED: " + e);
                 if (exitAfter) EditorApplication.Exit(1);
             }
+        }
+
+        /// <summary>Mockup-canon post: vignette + film grain + slight desaturation.</summary>
+        private static void BuildPostFx()
+        {
+            const string path = "Assets/Settings/CourthouseVolume.asset";
+            AssetDatabase.DeleteAsset(path);
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            AssetDatabase.CreateAsset(profile, path);
+
+            var vig = profile.Add<Vignette>(true);
+            vig.intensity.Override(0.38f);
+            vig.smoothness.Override(0.45f);
+            var grain = profile.Add<FilmGrain>(true);
+            grain.type.Override(FilmGrainLookup.Medium1);
+            grain.intensity.Override(0.45f);
+            var ca = profile.Add<ChromaticAberration>(true);
+            ca.intensity.Override(0.08f);
+            var col = profile.Add<ColorAdjustments>(true);
+            col.saturation.Override(-14f);
+            col.contrast.Override(10f);
+            col.postExposure.Override(0.15f);
+            EditorUtility.SetDirty(profile);
+
+            var volGo = new GameObject("PostFX");
+            var vol = volGo.AddComponent<Volume>();
+            vol.isGlobal = true;
+            vol.sharedProfile = profile;
         }
 
         private static GameObject BuildPlayerPrefab()
@@ -76,6 +107,8 @@ namespace CaseClosed.EditorTools
             var cam = camGo.AddComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor;      // no skybox — the void is black
             cam.backgroundColor = new Color(0.008f, 0.008f, 0.012f);
+            var camData = cam.GetUniversalAdditionalCameraData();
+            camData.renderPostProcessing = true;               // vignette + grain live here
             camGo.AddComponent<AudioListener>();
 
             player.AddComponent<FirstPersonController>();
