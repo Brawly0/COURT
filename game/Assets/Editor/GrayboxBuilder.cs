@@ -21,7 +21,7 @@ namespace CaseClosed.EditorTools
     {
         private const float WallH = 3.5f;
         private const float T = 0.3f;
-        private const float DoorW = 2.2f;
+        private const float DoorW = 2.6f;
 
         private static Material _brick, _plaster, _plasterLight, _wood, _carpet, _carpetOffice,
                                 _tile, _tileHall, _concrete, _metal, _tube, _screen, _redAccent, _yellow;
@@ -47,8 +47,12 @@ namespace CaseClosed.EditorTools
 
             // ---------------- floor plates ----------------
             // Ground hall (atrium floor) with a stair well for the basement flight
-            Slab(root, "Hall_Floor_W", -14, -4, 5.2f, 4, 0, _tileHall);
-            Slab(root, "Hall_Floor_E", 5.2f, -3.1f, 14, 4, 0, _tileHall);    // east strip; open well south of it (basement stairs)
+            // hall floor with a CENTERED stair well (the grand staircase lives mid-atrium,
+            // far from every door wall)
+            Slab(root, "Hall_Floor_W", -14, -4, -10.4f, 4, 0, _tileHall);
+            Slab(root, "Hall_Floor_E", -1.6f, -4, 14, 4, 0, _tileHall);
+            Slab(root, "Hall_Floor_N", -10.4f, 1.8f, -1.6f, 4, 0, _tileHall);
+            Slab(root, "Hall_Floor_S", -10.4f, -4, -1.6f, -1.8f, 0, _tileHall);
             Slab(root, "GarageLink_Floor", -24, -2, -14, 2, 0, _concrete);
             Slab(root, "Garage_Floor", -38, -7, -24, 7, 0, _concrete);
 
@@ -116,27 +120,35 @@ namespace CaseClosed.EditorTools
             // exterior brick shell around the core (visual thickness)
             BuildShell(root);
 
-            // ---------------- atrium staircases (every flight lands somewhere) ----------------
-            // B -> G : along south void edge, base in the basement corridor east end,
-            //          emerging through the hall's stair well
-            Ramp(root, "Stairs_B_to_G", new Vector3(14, -4, -3.55f), new Vector3(6, 0, -3.55f), 2.3f, _concrete);
-            // G -> F2 : along north void edge, west half
-            Ramp(root, "Stairs_G_to_F2", new Vector3(-14, 0, 3.55f), new Vector3(-6, 4, 3.55f), 2.3f, _tile);
-            Slab(root, "Landing_F2", -6, 3.1f, -5.2f, 4, 4, _tile);
-            // F2 -> F3 : along north void edge, east half
-            Slab(root, "Landing_F2_Base", 1.2f, 3.1f, 2, 4, 4, _tile);
-            Ramp(root, "Stairs_F2_to_F3", new Vector3(2, 4, 3.55f), new Vector3(10, 8, 3.55f), 2.3f, _tile);
-            Slab(root, "Landing_F3", 10, 3.1f, 10.8f, 4, 8, _tile);
+            // ---------------- THE GRAND STAIRCASE (stacked flights, mid-atrium) ----------------
+            // Basement flight, under the ground flight, emerging east out of the well:
+            RampRailed(root, "Stairs_B_to_G", new Vector3(-10, -4, 0), new Vector3(-2, 0, 0), 3.2f, _concrete);
+            // Ground -> F2, directly above it (4m headroom), base platform seals the well's west edge:
+            Slab(root, "Stairs_G_Base", -10.7f, -1.8f, -10, 1.8f, 0, _tileHall);
+            RampRailed(root, "Stairs_G_to_F2", new Vector3(-10, 0, 0), new Vector3(-2, 4, 0), 3.2f, _tileHall);
+            // Mid-air landing over the hall + bridge to the F2 north wing:
+            Slab(root, "Landing_F2", -2, -1.75f, 2, 1.75f, 4, _tileHall);
+            Slab(root, "Bridge_F2_North", -1.5f, 1.75f, 1.5f, 4, 4, _tileHall);
+            // F2 -> F3 continues east off the landing, bridging to the F3 east link:
+            RampRailed(root, "Stairs_F2_to_F3", new Vector3(2, 4, 0), new Vector3(10, 8, 0), 3.2f, _tileHall);
+            Slab(root, "Bridge_F3_East", 10, -1.6f, 11, 1.6f, 8, _tileHall);
 
-            // rails: atrium void edges on F2/F3, with gaps where stair bridges land
-            RailX(root, 4, -11, 11, new List<(float, float)> { (-5.6f, 1.4f), (1.6f, 1.4f) }, 4);  // F2 north (two bridges)
-            RailX(root, -4, -11, 11, new List<(float, float)>(), 4);                                // F2 south
+            // landing edge rails (open where flights arrive/depart, gap at the north bridge)
+            RailX(root, -1.75f, -2, 2, new List<(float, float)>(), 4);
+            RailX(root, 1.75f, -2, 2, new List<(float, float)> { (0f, 3.2f) }, 4);
+
+            // hall stair-well guards (east edge open - that's where the basement flight emerges)
+            RailX(root, 1.8f, -10.4f, -1.6f, new List<(float, float)>(), 0);
+            RailX(root, -1.8f, -10.4f, -1.6f, new List<(float, float)>(), 0);
+
+            // atrium void edge rails on F2/F3
+            RailX(root, 4, -11, 11, new List<(float, float)> { (0f, 3.4f) }, 4);   // F2 north: gap at bridge
+            RailX(root, -4, -11, 11, new List<(float, float)>(), 4);
             RailSegZ(root, -11, -4, 4, 4); RailSegZ(root, 11, -4, 4, 4);
-            RailX(root, 4, -11, 11, new List<(float, float)> { (10.4f, 1.4f) }, 8);                 // F3 north (bridge)
-            RailX(root, -4, -11, 11, new List<(float, float)>(), 8);                                // F3 south
-            RailSegZ(root, -11, -4, 4, 8); RailSegZ(root, 11, -4, 4, 8);
-            // hall stair-well guard (open at the emergence end x<7.5)
-            RailX(root, -3.1f, 7.5f, 14, new List<(float, float)>(), 0);
+            RailX(root, 4, -11, 11, new List<(float, float)>(), 8);
+            RailX(root, -4, -11, 11, new List<(float, float)>(), 8);
+            RailSegZ(root, -11, -4, 4, 8);
+            RailSegZ(root, 11, -4, -1.6f, 8); RailSegZ(root, 11, 1.6f, 4, 8);      // F3 east: gap at bridge
 
             // ---------------- zone anchors ----------------
             Anchor(root, "MainHall", 0, 0, 0);
@@ -326,28 +338,30 @@ namespace CaseClosed.EditorTools
             var sign = new GameObject("Sign_" + r.Name);
             sign.transform.SetParent(g.transform);
             sign.transform.position = pos;
-            float yaw = r.DoorSide == 'N' ? 0f : r.DoorSide == 'S' ? 180f : r.DoorSide == 'E' ? 90f : -90f;
+            // TextMesh reads correctly when its +Z points AWAY from the viewer.
+            // The viewer stands on the corridor side; +Z must point INTO the room.
+            float yaw = r.DoorSide == 'N' ? 180f : r.DoorSide == 'S' ? 0f : r.DoorSide == 'E' ? -90f : 90f;
             sign.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
 
             string label = r.SealedDoor ? "COURTROOM A - COURT IS IN SESSION" : Pretty(r.Name);
-            // backing plate + text on BOTH faces (one-sided TextMesh reads mirrored from behind)
-            var plate = Box(sign, "Plate", pos,
-                new Vector3(Mathf.Min(label.Length * 0.16f + 0.4f, 3.4f), 0.5f, 0.08f), _wood);
-            plate.transform.rotation = sign.transform.rotation;
-            for (int side = 0; side < 2; side++)
-            {
-                var tgo = new GameObject("Text");
-                tgo.transform.SetParent(sign.transform, false);
-                tgo.transform.localPosition = new Vector3(0f, 0f, side == 0 ? 0.06f : -0.06f);
-                tgo.transform.localRotation = Quaternion.Euler(0f, side == 0 ? 0f : 180f, 0f);
-                var tm = tgo.AddComponent<TextMesh>();
-                tm.text = label;
-                tm.characterSize = 0.05f;
-                tm.fontSize = 60;
-                tm.anchor = TextAnchor.MiddleCenter;
-                tm.alignment = TextAlignment.Center;
-                tm.color = new Color(1f, 0.97f, 0.85f);
-            }
+            // wooden plate sits BEHIND the text (toward the wall), single readable face
+            var plate = new GameObject("Plate");
+            plate.transform.SetParent(sign.transform, false);
+            plate.transform.localPosition = new Vector3(0f, 0f, 0.06f);
+            var plateBox = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            plateBox.transform.SetParent(plate.transform, false);
+            plateBox.transform.localScale = new Vector3(Mathf.Min(label.Length * 0.14f + 0.4f, 3.2f), 0.5f, 0.06f);
+            plateBox.GetComponent<Renderer>().sharedMaterial = _wood;
+
+            var tgo = new GameObject("Text");
+            tgo.transform.SetParent(sign.transform, false);
+            var tm = tgo.AddComponent<TextMesh>();
+            tm.text = label;
+            tm.characterSize = 0.05f;
+            tm.fontSize = 60;
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.alignment = TextAlignment.Center;
+            tm.color = new Color(1f, 0.97f, 0.85f);
         }
 
         private static string Pretty(string n)
@@ -422,6 +436,18 @@ namespace CaseClosed.EditorTools
             var r = Box(root, name, mid - Vector3.up * (T / 2f), new Vector3(width, T, len), mat);
             r.transform.rotation = Quaternion.LookRotation(new Vector3(dir.x, 0, dir.z).normalized) *
                                    Quaternion.Euler(-Mathf.Atan2(dir.y, new Vector2(dir.x, dir.z).magnitude) * Mathf.Rad2Deg, 0, 0);
+        }
+
+        /// <summary>A staircase flight with wooden side rails riding the slope.</summary>
+        private static void RampRailed(GameObject root, string name, Vector3 bottom, Vector3 top, float width, Material mat)
+        {
+            Ramp(root, name, bottom, top, width, mat);
+            // side rails: thin sloped boxes lifted above the surface, offset to the ramp's edges
+            Vector3 side = Vector3.Cross(Vector3.up, (top - bottom).normalized).normalized;
+            Vector3 lift = Vector3.up * 0.62f;
+            Vector3 off = side * (width / 2f + 0.08f);
+            Ramp(root, name + "_RailL", bottom + lift - off, top + lift - off, 0.12f, _wood);
+            Ramp(root, name + "_RailR", bottom + lift + off, top + lift + off, 0.12f, _wood);
         }
 
         private static void Anchor(GameObject root, string zone, float x, float y, float z)
@@ -581,8 +607,8 @@ namespace CaseClosed.EditorTools
         {
             var l = new GameObject(name).AddComponent<Light>();
             l.type = LightType.Point;
-            l.range = 15f;
-            l.intensity = 3.4f;
+            l.range = 16f;
+            l.intensity = 4.4f;
             l.color = c;
             l.transform.SetParent(root.transform);
             l.transform.position = new Vector3(x, y, z);

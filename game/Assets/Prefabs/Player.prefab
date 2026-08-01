@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 67298389842714570}
   - component: {fileID: 4322430369647093737}
   - component: {fileID: 7315984227788157457}
-  - component: {fileID: 868898937652022548}
+  - component: {fileID: 1006622089926123010}
   - component: {fileID: 5595014748296815386}
   m_Layer: 0
   m_Name: Player
@@ -123,7 +123,7 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &868898937652022548
+--- !u!114 &1006622089926123010
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -132,7 +132,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 275936497633253701}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 0}
+  m_Script: {fileID: 11500000, guid: 086c3a9f783cdc44e9e2b79e3cd7f1b8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.ClientNetworkTransform
   ShowTopMostFoldoutHeaderGroup: 1
