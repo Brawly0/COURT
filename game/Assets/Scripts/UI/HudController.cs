@@ -68,6 +68,13 @@ namespace CaseClosed.Game
             // crosshair dot
             GUI.Label(new Rect(Screen.width / 2f - 4, Screen.height / 2f - 12, 20, 20), "·", _big);
 
+            // trial banner
+            if (rt.BellRung)
+                GUI.Label(new Rect(Screen.width / 2f - 300, 20, 600, 40),
+                    "TRIAL PHASE — COURT IS IN SESSION",
+                    new GUIStyle(_big) { alignment = TextAnchor.MiddleCenter,
+                        normal = { textColor = new Color(1f, 0.85f, 0.4f) } });
+
             // bottom-right: log (last 8 lines)
             int shown = Mathf.Min(8, rt.Log.Count);
             for (int i = 0; i < shown; i++)

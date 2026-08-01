@@ -57,10 +57,42 @@ namespace CaseClosed.Game
             TimeRemaining -= Time.deltaTime;
             if (TimeRemaining <= 0f)
             {
-                TimeRemaining = 0f;
-                BellRung = true;
-                AddLog("*** THE DOCKET BELL RINGS — investigation is over. ***");
+                var nm = Unity.Netcode.NetworkManager.Singleton;
+                bool online = nm != null && nm.IsListening;
+                if (!online)
+                    RingBell();                              // offline: ring locally
+                else if (nm.IsServer)
+                    CaseNetSync.Instance.ServerRingBell();   // server decides; RPC rings everyone
+                else
+                    TimeRemaining = 0.01f;                   // client: hold at 0 until the server's bell
             }
+        }
+
+        /// <summary>The docket bell: investigation over, everyone into the courtroom.</summary>
+        public void RingBell()
+        {
+            if (BellRung) return;
+            BellRung = true;
+            TimeRemaining = 0f;
+            AddLog("*** THE DOCKET BELL RINGS — investigation is over. ***");
+            AddLog("The bailiff escorts everyone into Courtroom A. Court is in session.");
+            TeleportLocalPlayerToCourtroom();
+        }
+
+        private void TeleportLocalPlayerToCourtroom()
+        {
+            var fpc = FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None)
+                .FirstOrDefault(p => p.enabled && p.gameObject.activeInHierarchy);
+            if (fpc == null) return;
+
+            var nm = Unity.Netcode.NetworkManager.Singleton;
+            int seat = nm != null && nm.IsListening ? (int)nm.LocalClientId : 0;
+            var pos = new Vector3(2.8f + (seat % 4) * 2.4f, 0.15f, 4.9f + (seat / 4) * 1.3f);
+
+            var cc = fpc.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;              // CC stomps teleports; toggle around it
+            fpc.transform.SetPositionAndRotation(pos, Quaternion.identity); // face the judge
+            if (cc != null) cc.enabled = true;
         }
 
         private void SpawnEvidence(Dictionary<string, Transform> anchors)

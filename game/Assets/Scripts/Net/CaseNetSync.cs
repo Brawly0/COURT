@@ -45,6 +45,20 @@ namespace CaseClosed.Game
             CollectServerRpc(index, itemName);
         }
 
+        /// <summary>Server-authoritative docket bell: one clock rules them all.</summary>
+        public void ServerRingBell()
+        {
+            if (!IsServer) return;
+            RingBellClientRpc();
+        }
+
+        [ClientRpc]
+        private void RingBellClientRpc()
+        {
+            Debug.Log("[CaseNetSync] BELL rung by server");
+            CaseRuntime.Instance.RingBell();
+        }
+
         [ServerRpc(RequireOwnership = false)]
         private void CollectServerRpc(int index, string itemName)
         {
