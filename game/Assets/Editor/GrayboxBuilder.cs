@@ -23,7 +23,8 @@ namespace CaseClosed.EditorTools
         private const float T = 0.3f;
         private const float DoorW = 2.2f;
 
-        private static Material _brick, _plaster, _wood, _carpet, _tile, _concrete, _metal;
+        private static Material _brick, _plaster, _plasterLight, _wood, _carpet, _carpetOffice,
+                                _tile, _tileHall, _concrete, _metal, _tube, _screen, _redAccent, _yellow;
 
         private class Room
         {
@@ -46,8 +47,8 @@ namespace CaseClosed.EditorTools
 
             // ---------------- floor plates ----------------
             // Ground hall (atrium floor) with a stair well for the basement flight
-            Slab(root, "Hall_Floor_W", -14, -4, 5.2f, 4, 0, _tile);
-            Slab(root, "Hall_Floor_E", 5.2f, -3.1f, 14, 4, 0, _tile);        // east strip; open well south of it (basement stairs)
+            Slab(root, "Hall_Floor_W", -14, -4, 5.2f, 4, 0, _tileHall);
+            Slab(root, "Hall_Floor_E", 5.2f, -3.1f, 14, 4, 0, _tileHall);    // east strip; open well south of it (basement stairs)
             Slab(root, "GarageLink_Floor", -24, -2, -14, 2, 0, _concrete);
             Slab(root, "Garage_Floor", -38, -7, -24, 7, 0, _concrete);
 
@@ -87,10 +88,10 @@ namespace CaseClosed.EditorTools
                 new Room("HoldingCells",   -14, -12, -2, -4, -4, 'N', -8f, _concrete, _concrete),
                 new Room("BoilerRoom",      -2, -12, 14, -4, -4, 'N', 8f, _concrete, _concrete),
                 // floor 2
-                new Room("ProsecutionOffice", -14, 4, -2, 12, 4, 'S', -8f),
+                new Room("ProsecutionOffice", -14, 4, -2, 12, 4, 'S', -8f, null, _carpetOffice),
                 new Room("Archives",           -2, 4, 14, 12, 4, 'S', 8f),
                 new Room("RecordsRoom",      -14, -12, -2, -4, 4, 'N', -8f),
-                new Room("DefenseOffice",     -2, -12, 14, -4, 4, 'N', 8f),
+                new Room("DefenseOffice",     -2, -12, 14, -4, 4, 'N', 8f, null, _carpetOffice),
                 // floor 3
                 new Room("CourtroomB",       -14, 4, -2, 12, 8, 'S', -8f, _wood, _carpet),
                 new Room("JudgeChambers",     -2, 4, 14, 12, 8, 'S', 8f, _wood),
@@ -163,11 +164,18 @@ namespace CaseClosed.EditorTools
             // ---------------- light: municipal dread ----------------
             RenderSettings.skybox = null;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.055f, 0.06f, 0.075f);
+            RenderSettings.ambientLight = new Color(0.10f, 0.105f, 0.12f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Exponential;
             RenderSettings.fogColor = new Color(0.015f, 0.015f, 0.02f);
-            RenderSettings.fogDensity = 0.02f;
+            RenderSettings.fogDensity = 0.015f;
+
+            // hall fluorescent strips, wall-mounted above the wainscot on both sides
+            for (int i = 0; i < 3; i++)
+            {
+                Box(root, "HallTube", new Vector3(-8f + i * 8f, 3.05f, 3.80f), new Vector3(3.2f, 0.07f, 0.12f), _tube);
+                Box(root, "HallTube", new Vector3(-8f + i * 8f, 3.05f, -3.80f), new Vector3(3.2f, 0.07f, 0.12f), _tube);
+            }
 
             foreach (var r in rooms)
                 RoomLight(root, r.Name + "_Light",
@@ -189,12 +197,28 @@ namespace CaseClosed.EditorTools
             if (!AssetDatabase.IsValidFolder("Assets/Materials"))
                 AssetDatabase.CreateFolder("Assets", "Materials");
             _brick = Mat("Brick", new Color(0.42f, 0.20f, 0.15f));
-            _plaster = Mat("Plaster", new Color(0.52f, 0.48f, 0.38f));
-            _wood = Mat("WoodDark", new Color(0.24f, 0.15f, 0.09f));
+            _plaster = Mat("Plaster", new Color(0.58f, 0.54f, 0.44f));
+            _plasterLight = Mat("PlasterLight", new Color(0.72f, 0.70f, 0.63f));
+            _wood = Mat("WoodDark", new Color(0.26f, 0.17f, 0.10f));
             _carpet = Mat("Carpet", new Color(0.10f, 0.20f, 0.15f));
-            _tile = Mat("FloorTile", new Color(0.34f, 0.36f, 0.32f));
-            _concrete = Mat("Concrete", new Color(0.30f, 0.30f, 0.31f));
+            _carpetOffice = Mat("CarpetOffice", new Color(0.30f, 0.13f, 0.11f));
+            _tile = Mat("FloorTile", new Color(0.38f, 0.40f, 0.36f));
+            _tileHall = Mat("FloorTileHall", new Color(0.47f, 0.48f, 0.43f));
+            _concrete = Mat("Concrete", new Color(0.33f, 0.33f, 0.34f));
             _metal = Mat("Metal", new Color(0.35f, 0.36f, 0.40f));
+            _tube = MatEmissive("TubeLight", new Color(0.9f, 0.92f, 0.85f), new Color(1.6f, 1.55f, 1.35f));
+            _screen = MatEmissive("Screen", new Color(0.1f, 0.2f, 0.12f), new Color(0.25f, 0.9f, 0.35f));
+            _redAccent = MatEmissive("RedAccent", new Color(0.45f, 0.07f, 0.05f), new Color(0.55f, 0.06f, 0.04f));
+            _yellow = Mat("CautionYellow", new Color(0.75f, 0.62f, 0.10f));
+        }
+
+        private static Material MatEmissive(string name, Color baseCol, Color emission)
+        {
+            var m = Mat(name, baseCol);
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            m.SetColor("_EmissionColor", emission);
+            return m;
         }
 
         private static Material Mat(string name, Color c)
@@ -239,9 +263,21 @@ namespace CaseClosed.EditorTools
             WallZ(g, r, r.X1, r.DoorSide == 'E', wall);
             WallZ(g, r, r.X0, r.DoorSide == 'W', wall);
 
+            // ceiling board + fluorescent tubes (except the open garage volume)
+            if (r.Name != "ParkingGarage")
+            {
+                float cy = r.Y + (r.Name == "CourtroomA" ? 3.9f : 3.42f);
+                Slab(g, r.Name + "_Ceiling", r.X0 + 0.15f, r.Z0 + 0.15f, r.X1 - 0.15f, r.Z1 - 0.15f,
+                     cy + T, _plasterLight);
+                float cx = (r.X0 + r.X1) / 2f, cz = (r.Z0 + r.Z1) / 2f;
+                Box(g, "Tube", new Vector3(cx - 2.5f, cy - 0.05f, cz), new Vector3(2.4f, 0.07f, 0.2f), _tube);
+                Box(g, "Tube", new Vector3(cx + 2.5f, cy - 0.05f, cz), new Vector3(2.4f, 0.07f, 0.2f), _tube);
+            }
+
             // door frame (+ sealed slab for Courtroom A)
             BuildDoorway(g, r);
             DoorSign(g, r);
+            AddProps(g, r);
         }
 
         private static void BuildDoorway(GameObject g, Room r)
@@ -287,18 +323,31 @@ namespace CaseClosed.EditorTools
                 ? new Vector3(r.DoorAt, r.Y + 2.85f, wallPos + outward)
                 : new Vector3(wallPos + outwardX, r.Y + 2.85f, r.DoorAt);
 
-            var go = new GameObject("Sign_" + r.Name);
-            go.transform.SetParent(g.transform);
-            go.transform.position = pos;
+            var sign = new GameObject("Sign_" + r.Name);
+            sign.transform.SetParent(g.transform);
+            sign.transform.position = pos;
             float yaw = r.DoorSide == 'N' ? 0f : r.DoorSide == 'S' ? 180f : r.DoorSide == 'E' ? 90f : -90f;
-            go.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-            var tm = go.AddComponent<TextMesh>();
-            tm.text = r.SealedDoor ? "COURTROOM A — COURT IS IN SESSION" : Pretty(r.Name);
-            tm.characterSize = 0.055f;
-            tm.fontSize = 60;
-            tm.anchor = TextAnchor.MiddleCenter;
-            tm.alignment = TextAlignment.Center;
-            tm.color = new Color(1f, 0.97f, 0.85f);
+            sign.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+
+            string label = r.SealedDoor ? "COURTROOM A - COURT IS IN SESSION" : Pretty(r.Name);
+            // backing plate + text on BOTH faces (one-sided TextMesh reads mirrored from behind)
+            var plate = Box(sign, "Plate", pos,
+                new Vector3(Mathf.Min(label.Length * 0.16f + 0.4f, 3.4f), 0.5f, 0.08f), _wood);
+            plate.transform.rotation = sign.transform.rotation;
+            for (int side = 0; side < 2; side++)
+            {
+                var tgo = new GameObject("Text");
+                tgo.transform.SetParent(sign.transform, false);
+                tgo.transform.localPosition = new Vector3(0f, 0f, side == 0 ? 0.06f : -0.06f);
+                tgo.transform.localRotation = Quaternion.Euler(0f, side == 0 ? 0f : 180f, 0f);
+                var tm = tgo.AddComponent<TextMesh>();
+                tm.text = label;
+                tm.characterSize = 0.05f;
+                tm.fontSize = 60;
+                tm.anchor = TextAnchor.MiddleCenter;
+                tm.alignment = TextAlignment.Center;
+                tm.color = new Color(1f, 0.97f, 0.85f);
+            }
         }
 
         private static string Pretty(string n)
@@ -331,10 +380,20 @@ namespace CaseClosed.EditorTools
         private static void WallSeg(GameObject parent, float x0, float x1, float z0, float z1, float y, Material mat = null)
         {
             bool alongX = Mathf.Abs(x1 - x0) > Mathf.Abs(z1 - z0);
-            Box(parent, "Wall",
-                new Vector3((x0 + x1) / 2f, y + WallH / 2f, (z0 + z1) / 2f),
-                alongX ? new Vector3(x1 - x0, WallH, T) : new Vector3(T, WallH, z1 - z0),
-                mat != null ? mat : _plaster);
+            var m = mat != null ? mat : _plaster;
+            Vector3 mid = new Vector3((x0 + x1) / 2f, 0, (z0 + z1) / 2f);
+            if (m == _plaster)
+            {
+                // courthouse two-tone: dark wood wainscot under plaster
+                const float wainH = 1.15f;
+                Box(parent, "Wainscot", mid + Vector3.up * (y + wainH / 2f),
+                    alongX ? new Vector3(x1 - x0, wainH, T + 0.04f) : new Vector3(T + 0.04f, wainH, z1 - z0), _wood);
+                Box(parent, "Wall", mid + Vector3.up * (y + wainH + (WallH - wainH) / 2f),
+                    alongX ? new Vector3(x1 - x0, WallH - wainH, T) : new Vector3(T, WallH - wainH, z1 - z0), _plaster);
+                return;
+            }
+            Box(parent, "Wall", mid + Vector3.up * (y + WallH / 2f),
+                alongX ? new Vector3(x1 - x0, WallH, T) : new Vector3(T, WallH, z1 - z0), m);
         }
 
         private static void RailX(GameObject root, float z, float x0, float x1, List<(float center, float width)> gaps, float y)
@@ -403,6 +462,119 @@ namespace CaseClosed.EditorTools
                     Box(g, "Gallery_Bench",
                         new Vector3(3.4f + col * 5.2f, 0.28f, 5.2f + row * 1.2f),
                         new Vector3(3.6f, 0.55f, 0.5f), _wood);
+        }
+
+        /// <summary>Per-room furniture blockout: rooms should read at a glance.</summary>
+        private static void AddProps(GameObject g, Room r)
+        {
+            float cx = (r.X0 + r.X1) / 2f, cz = (r.Z0 + r.Z1) / 2f, y = r.Y;
+            switch (r.Name)
+            {
+                case "CourtroomA": return; // furnished separately
+                case "EvidenceLocker":
+                case "Archives":
+                case "RecordsRoom":
+                    for (int row = 0; row < 3; row++)
+                        Box(g, "Shelf", new Vector3(cx, y + 1.1f, r.Z0 + 2.2f + row * 2.6f),
+                            new Vector3((r.X1 - r.X0) - 3.5f, 2.2f, 0.6f), _metal);
+                    Box(g, "Desk", new Vector3(r.X0 + 1.6f, y + 0.5f, r.Z0 + 1.2f), new Vector3(1.8f, 1.0f, 0.8f), _wood);
+                    break;
+                case "Lab":
+                    Box(g, "Bench_N", new Vector3(cx, y + 0.5f, r.Z1 - 1.0f), new Vector3((r.X1 - r.X0) - 3f, 1.0f, 1.0f), _metal);
+                    Box(g, "Bench_S", new Vector3(cx, y + 0.5f, r.Z0 + 1.0f), new Vector3((r.X1 - r.X0) - 3f, 1.0f, 1.0f), _metal);
+                    for (int m = 0; m < 3; m++)
+                    {
+                        Box(g, "Machine", new Vector3(r.X0 + 2.5f + m * 3.4f, y + 1.35f, r.Z1 - 1.0f),
+                            new Vector3(1.1f, 0.7f, 0.7f), _metal);
+                        Box(g, "MachineScreen", new Vector3(r.X0 + 2.5f + m * 3.4f, y + 1.4f, r.Z1 - 0.6f),
+                            new Vector3(0.7f, 0.4f, 0.06f), _screen);
+                    }
+                    break;
+                case "ProsecutionOffice":
+                case "DefenseOffice":
+                case "JudgeChambers":
+                case "StaffRoom":
+                    for (int d = 0; d < 2; d++)
+                    {
+                        Box(g, "Desk", new Vector3(cx - 2.5f + d * 5f, y + 0.42f, cz), new Vector3(2.2f, 0.84f, 1.1f), _wood);
+                        Box(g, "Chair", new Vector3(cx - 2.5f + d * 5f, y + 0.32f, cz - 1.2f), new Vector3(0.55f, 0.64f, 0.55f), _wood);
+                    }
+                    Box(g, "Cabinet", new Vector3(r.X1 - 0.8f, y + 1.0f, r.Z1 - 0.8f), new Vector3(1.0f, 2.0f, 0.6f), _metal);
+                    break;
+                case "Cafeteria":
+                    for (int t2 = 0; t2 < 3; t2++)
+                        Box(g, "Table", new Vector3(r.X0 + 2.5f + t2 * 3.4f, y + 0.42f, cz), new Vector3(1.6f, 0.84f, 1.6f), _wood);
+                    Box(g, "Counter", new Vector3(cx, y + 0.55f, r.Z0 + 1.0f), new Vector3((r.X1 - r.X0) - 4f, 1.1f, 1.0f), _metal);
+                    // the vending machine: one red accent per room (GDD 11)
+                    Box(g, "Vending", new Vector3(r.X1 - 0.9f, y + 1.0f, r.Z1 - 0.9f), new Vector3(1.0f, 2.0f, 0.9f), _redAccent);
+                    Box(g, "VendingGlow", new Vector3(r.X1 - 0.9f, y + 1.2f, r.Z1 - 1.38f), new Vector3(0.6f, 1.2f, 0.06f), _screen);
+                    break;
+                case "Security":
+                    Box(g, "Console", new Vector3(cx, y + 0.5f, r.Z1 - 1.0f), new Vector3(4.5f, 1.0f, 0.9f), _metal);
+                    for (int s = 0; s < 4; s++)
+                        Box(g, "Monitor", new Vector3(cx - 1.7f + s * 1.15f, y + 1.45f, r.Z1 - 0.75f),
+                            new Vector3(0.9f, 0.65f, 0.08f), _screen);
+                    Box(g, "Chair", new Vector3(cx, y + 0.32f, r.Z1 - 2.2f), new Vector3(0.55f, 0.64f, 0.55f), _wood);
+                    break;
+                case "HoldingCells":
+                    for (int cell = 0; cell < 2; cell++)
+                    {
+                        float bx = r.X0 + 1.5f + cell * ((r.X1 - r.X0 - 3f) / 2f + 0.8f);
+                        for (int bar = 0; bar < 9; bar++)
+                        {
+                            var b = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                            b.name = "Bar";
+                            b.transform.SetParent(g.transform);
+                            b.transform.position = new Vector3(bx + bar * 0.42f, y + 1.3f, cz);
+                            b.transform.localScale = new Vector3(0.07f, 1.3f, 0.07f);
+                            b.GetComponent<Renderer>().sharedMaterial = _metal;
+                        }
+                        Box(g, "Bunk", new Vector3(bx + 1.7f, y + 0.3f, r.Z1 - 0.8f), new Vector3(2.0f, 0.25f, 0.9f), _metal);
+                    }
+                    break;
+                case "BoilerRoom":
+                    for (int b2 = 0; b2 < 2; b2++)
+                    {
+                        var tank = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                        tank.name = "Boiler";
+                        tank.transform.SetParent(g.transform);
+                        tank.transform.position = new Vector3(cx - 2.5f + b2 * 5f, y + 1.5f, cz);
+                        tank.transform.localScale = new Vector3(1.8f, 1.5f, 1.8f);
+                        tank.GetComponent<Renderer>().sharedMaterial = _metal;
+                    }
+                    break;
+                case "Maintenance":
+                    Box(g, "Shelf", new Vector3(cx, y + 1.1f, r.Z1 - 0.6f), new Vector3((r.X1 - r.X0) - 3f, 2.2f, 0.6f), _metal);
+                    var bucket = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    bucket.name = "MopBucket";
+                    bucket.transform.SetParent(g.transform);
+                    bucket.transform.position = new Vector3(cx, y + 0.25f, cz);
+                    bucket.transform.localScale = new Vector3(0.45f, 0.25f, 0.45f);
+                    bucket.GetComponent<Renderer>().sharedMaterial = _yellow;
+                    break;
+                case "PressRoom":
+                    Box(g, "Podium", new Vector3(cx, y + 0.6f, r.Z1 - 1.2f), new Vector3(0.8f, 1.2f, 0.6f), _wood);
+                    for (int row = 0; row < 2; row++)
+                        for (int c2 = 0; c2 < 3; c2++)
+                            Box(g, "Chair", new Vector3(cx - 2f + c2 * 2f, y + 0.32f, cz - 1f + row * 1.3f),
+                                new Vector3(0.55f, 0.64f, 0.55f), _wood);
+                    break;
+                case "CourtroomB":
+                    for (int crate = 0; crate < 6; crate++)
+                        Box(g, "Crate", new Vector3(r.X0 + 1.5f + (crate % 3) * 1.6f, y + 0.45f + (crate / 3) * 0.9f,
+                            r.Z1 - 1.4f), new Vector3(1.2f, 0.9f, 1.2f), _wood);
+                    Box(g, "DustyBench", new Vector3(cx, y + 0.6f, r.Z0 + 1.4f), new Vector3(3.5f, 1.2f, 1.0f), _wood);
+                    break;
+                case "ParkingGarage":
+                    for (int car = 0; car < 3; car++)
+                    {
+                        float carX = r.X0 + 3f + car * 4.5f;
+                        Box(g, "CarBody", new Vector3(carX, y + 0.75f, cz - 2f), new Vector3(2.0f, 0.9f, 4.2f),
+                            car == 1 ? _redAccent : _metal);
+                        Box(g, "CarCabin", new Vector3(carX, y + 1.45f, cz - 2.4f), new Vector3(1.8f, 0.6f, 2.0f), _metal);
+                    }
+                    break;
+            }
         }
 
         private static void RoomLight(GameObject root, string name, float x, float y, float z, Color c)

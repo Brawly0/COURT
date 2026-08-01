@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using CaseClosed.TruthEngine;
@@ -9,7 +9,7 @@ namespace CaseClosed.Game
     /// Bridges the TruthEngine to the world: generates the case from a seed,
     /// spawns evidence into the zones its FoundAt string names, staffs the
     /// building with witnesses, runs the investigation clock. Ground truth
-    /// stays inside the CaseFile — nothing here prints GUILTY anywhere.
+    /// stays inside the CaseFile - nothing here prints GUILTY anywhere.
     /// </summary>
     public class CaseRuntime : MonoBehaviour
     {
@@ -40,7 +40,7 @@ namespace CaseClosed.Game
             TimeRemaining = InvestigationSeconds;
             EvidenceTotal = Case.Evidence.Count;
 
-            var anchors = FindObjectsByType<ZoneAnchor>(FindObjectsSortMode.None)
+            var anchors = FindObjectsByType<ZoneAnchor>()
                 .ToDictionary(a => a.ZoneName, a => a.transform);
 
             SpawnEvidence(anchors);
@@ -74,14 +74,14 @@ namespace CaseClosed.Game
             if (BellRung) return;
             BellRung = true;
             TimeRemaining = 0f;
-            AddLog("*** THE DOCKET BELL RINGS — investigation is over. ***");
+            AddLog("*** THE DOCKET BELL RINGS - investigation is over. ***");
             AddLog("The bailiff escorts everyone into Courtroom A. Court is in session.");
             TeleportLocalPlayerToCourtroom();
         }
 
         private void TeleportLocalPlayerToCourtroom()
         {
-            var fpc = FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None)
+            var fpc = FindObjectsByType<FirstPersonController>()
                 .FirstOrDefault(p => p.enabled && p.gameObject.activeInHierarchy);
             if (fpc == null) return;
 
@@ -145,7 +145,7 @@ namespace CaseClosed.Game
             return new Vector3(Mathf.Cos(angle) * r, 0.35f, Mathf.Sin(angle) * r);
         }
 
-        /// <summary>Applies a (validated) collection locally — called on every client.</summary>
+        /// <summary>Applies a (validated) collection locally - called on every client.</summary>
         public void ApplyCollect(int index, string itemName)
         {
             if (BellRung) { AddLog("The bell has rung. Nothing more can be collected."); return; }
@@ -163,3 +163,4 @@ namespace CaseClosed.Game
         }
     }
 }
+

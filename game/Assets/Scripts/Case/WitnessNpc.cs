@@ -65,14 +65,4 @@ namespace CaseClosed.Game
             return tm;
         }
     }
-
-    public class FaceCamera : MonoBehaviour
-    {
-        private void LateUpdate()
-        {
-            var cam = Camera.main;
-            if (cam != null)
-                transform.rotation = Quaternion.LookRotation(transform.position - cam.transform.position);
-        }
-    }
 }

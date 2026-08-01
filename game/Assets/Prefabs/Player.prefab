@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 67298389842714570}
   - component: {fileID: 4322430369647093737}
   - component: {fileID: 7315984227788157457}
-  - component: {fileID: 8871143027515460049}
+  - component: {fileID: 868898937652022548}
   - component: {fileID: 5595014748296815386}
   m_Layer: 0
   m_Name: Player
@@ -123,7 +123,7 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &8871143027515460049
+--- !u!114 &868898937652022548
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}

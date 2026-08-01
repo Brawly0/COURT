@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using Unity.Netcode;
 using UnityEngine;
@@ -53,7 +53,7 @@ namespace CaseClosed.Game
             _t += Time.deltaTime;
 
             // drive the owned player east-west so remotes have motion to replicate
-            var own = FindObjectsByType<NetPlayer>(FindObjectsSortMode.None)
+            var own = FindObjectsByType<NetPlayer>()
                 .FirstOrDefault(p => p.IsOwner);
             if (own != null)
             {
@@ -80,9 +80,10 @@ namespace CaseClosed.Game
 
         private void Report()
         {
-            foreach (var p in FindObjectsByType<NetPlayer>(FindObjectsSortMode.None))
+            foreach (var p in FindObjectsByType<NetPlayer>())
                 Debug.Log($"[MPTEST] {(p.IsOwner ? "OWN " : "REMOTE")} id={p.OwnerClientId} " +
                           $"pos=({p.transform.position.x:F2},{p.transform.position.y:F2},{p.transform.position.z:F2})");
         }
     }
 }
+

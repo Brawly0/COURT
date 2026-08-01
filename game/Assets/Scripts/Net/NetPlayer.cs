@@ -1,5 +1,4 @@
 using Unity.Netcode;
-using Unity.Netcode.Components;
 using UnityEngine;
 
 namespace CaseClosed.Game
@@ -37,10 +36,4 @@ namespace CaseClosed.Game
         }
     }
 
-    /// <summary>Owner-authoritative NetworkTransform (standard NGO pattern).</summary>
-    public class ClientNetworkTransform : NetworkTransform
-    {
-        public bool IsOwnerAuthoritative => !OnIsServerAuthoritative();
-        protected override bool OnIsServerAuthoritative() => false;
-    }
 }
