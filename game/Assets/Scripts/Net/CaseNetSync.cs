@@ -25,9 +25,14 @@ namespace CaseClosed.Game
             if (IsServer)
                 _seed.Value = CaseRuntime.Instance.Seed;
 
+            Debug.Log($"[CaseNetSync] spawn server={IsServer} seed={_seed.Value}");
             if (_seed.Value != 0)
                 CaseRuntime.Instance.GenerateNow(_seed.Value);
-            _seed.OnValueChanged += (_, v) => CaseRuntime.Instance.GenerateNow(v);
+            _seed.OnValueChanged += (_, v) =>
+            {
+                Debug.Log($"[CaseNetSync] seed received: {v}");
+                CaseRuntime.Instance.GenerateNow(v);
+            };
         }
 
         public void RequestCollect(int index, string itemName)
@@ -44,12 +49,16 @@ namespace CaseClosed.Game
         private void CollectServerRpc(int index, string itemName)
         {
             // server-validated: the item must still exist server-side
+            Debug.Log($"[CaseNetSync] CollectServerRpc({index})");
             if (GameObject.Find($"Evidence_{index}") == null) return;
             CollectClientRpc(index, itemName);
         }
 
         [ClientRpc]
         private void CollectClientRpc(int index, string itemName)
-            => CaseRuntime.Instance.ApplyCollect(index, itemName);
+        {
+            Debug.Log($"[CaseNetSync] CollectClientRpc({index})");
+            CaseRuntime.Instance.ApplyCollect(index, itemName);
+        }
     }
 }

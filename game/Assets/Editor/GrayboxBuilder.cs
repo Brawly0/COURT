@@ -57,6 +57,17 @@ namespace CaseClosed.EditorTools
             // (its door faces east onto x=-8; give the link slab reach)
             Slab(root, "Floor2_SouthLandng", -10, -13, -8, -5, 4);
 
+            // ---------------- envelope: the building is a BUILDING now ----------------
+            Slab(root, "Roof", -22, -16, 20, 17, 7.8f);                 // hall stays double-height under it
+            Slab(root, "Ceiling_Cafeteria", 8, -13, 20, -5, 3.6f);
+            Slab(root, "Roof_Garage", -38, -8, -22, 8, 3.4f);
+            PerimeterWall(root, -22, -16, 20, 17, -4f, 12f,
+                gapAtWestZ0: -2f, gapAtWestZ1: 2f);                     // one gap: the garage link
+            // garage shell
+            WallSeg(root, -38, -38, -8, 8, 0);
+            WallSeg(root, -38, -22, -8, -8, 0);
+            WallSeg(root, -38, -22, 8, 8, 0);
+
             // ---------------- ramps ----------------
             Ramp(root, "Ramp_UpToFloor2", new Vector3(-4, 0, 5), new Vector3(-4, 4, 13), 4f);
             Ramp(root, "Ramp_DownToBasement", new Vector3(-2, 0, -5), new Vector3(-2, -4, -13), 4f);
@@ -78,23 +89,23 @@ namespace CaseClosed.EditorTools
             Anchor(root, "ProsecutionOffice", -14, 4, 10);
             Anchor(root, "DefenseOffice", -14, 4, -9);
 
-            // ---------------- light ----------------
+            // ---------------- light: municipal dread, not daylight ----------------
+            RenderSettings.skybox = null;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.16f, 0.17f, 0.20f);
-            var sun = new GameObject("Dim Directional").AddComponent<Light>();
-            sun.type = LightType.Directional;
-            sun.intensity = 0.30f;
-            sun.color = new Color(1.0f, 0.95f, 0.85f);
-            sun.transform.rotation = Quaternion.Euler(55f, -35f, 0f);
-            sun.transform.SetParent(root.transform);
+            RenderSettings.ambientLight = new Color(0.055f, 0.06f, 0.075f);
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Exponential;
+            RenderSettings.fogColor = new Color(0.015f, 0.015f, 0.02f);
+            RenderSettings.fogDensity = 0.022f;
 
             foreach (var r in rooms)
                 RoomLight(root, r.Name + "_Light",
                     (r.X0 + r.X1) / 2f, r.Y + 2.9f, (r.Z0 + r.Z1) / 2f,
-                    r.Name == "ParkingGarage" ? new Color(0.75f, 0.95f, 0.8f) : new Color(1f, 0.93f, 0.78f));
-            RoomLight(root, "Hall_Light_E", 10, 2.9f, 0, new Color(1f, 0.93f, 0.78f));
-            RoomLight(root, "Hall_Light_W", -10, 2.9f, 0, new Color(1f, 0.93f, 0.78f));
-            RoomLight(root, "Basement_Light", -10, -1.2f, 0, new Color(0.8f, 0.9f, 0.75f));
+                    r.Name == "ParkingGarage" ? new Color(0.72f, 0.95f, 0.78f) : new Color(1f, 0.92f, 0.74f));
+            RoomLight(root, "Hall_Light_E", 10, 3.4f, 0, new Color(1f, 0.92f, 0.74f));
+            RoomLight(root, "Hall_Light_C", 0, 3.4f, 0, new Color(1f, 0.92f, 0.74f));
+            RoomLight(root, "Hall_Light_W", -10, 3.4f, 0, new Color(1f, 0.92f, 0.74f));
+            RoomLight(root, "Basement_Light", -10, -1.2f, 0, new Color(0.78f, 0.92f, 0.72f));
         }
 
         // ------------------------------------------------------------------
@@ -213,11 +224,33 @@ namespace CaseClosed.EditorTools
         {
             var l = new GameObject(name).AddComponent<Light>();
             l.type = LightType.Point;
-            l.range = 13f;
-            l.intensity = 2.1f;
+            l.range = 15f;
+            l.intensity = 3.4f;
             l.color = c;
             l.transform.SetParent(root.transform);
             l.transform.position = new Vector3(x, y, z);
+        }
+
+        /// <summary>Full-height outer walls, with one doorway gap on the west side.</summary>
+        private static void PerimeterWall(GameObject root, float x0, float z0, float x1, float z1,
+            float yBottom, float height, float gapAtWestZ0, float gapAtWestZ1)
+        {
+            void Seg(float ax0, float ax1, float az0, float az1)
+            {
+                var w = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                w.name = "Perimeter";
+                w.transform.SetParent(root.transform);
+                bool alongX = Mathf.Abs(ax1 - ax0) > Mathf.Abs(az1 - az0);
+                w.transform.position = new Vector3((ax0 + ax1) / 2f, yBottom + height / 2f, (az0 + az1) / 2f);
+                w.transform.localScale = alongX
+                    ? new Vector3(ax1 - ax0, height, T)
+                    : new Vector3(T, height, az1 - az0);
+            }
+            Seg(x0, x1, z1, z1);                    // north
+            Seg(x0, x1, z0, z0);                    // south
+            Seg(x1, x1, z0, z1);                    // east
+            Seg(x0, x0, z0, gapAtWestZ0);           // west below gap
+            Seg(x0, x0, gapAtWestZ1, z1);           // west above gap
         }
     }
 }

@@ -14,6 +14,9 @@ namespace CaseClosed.Game
     {
         public override void OnNetworkSpawn()
         {
+            var cnt = GetComponent<ClientNetworkTransform>();
+            Debug.Log($"[NetPlayer] spawn id={OwnerClientId} owner={IsOwner} ownerAuth={cnt != null && cnt.IsOwnerAuthoritative}");
+
             if (IsOwner)
             {
                 // hall spawn, staggered so players don't share a skeleton
@@ -25,6 +28,10 @@ namespace CaseClosed.Game
             if (fpc != null) fpc.enabled = false;
             var interactor = GetComponent<Interactor>();
             if (interactor != null) interactor.enabled = false;
+            // CRITICAL: a live CharacterController stomps external transform writes,
+            // freezing remote copies at spawn. Remote = pure puppet, no CC.
+            var cc = GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
             var cam = GetComponentInChildren<Camera>(true);
             if (cam != null) cam.gameObject.SetActive(false);
         }
@@ -33,6 +40,7 @@ namespace CaseClosed.Game
     /// <summary>Owner-authoritative NetworkTransform (standard NGO pattern).</summary>
     public class ClientNetworkTransform : NetworkTransform
     {
+        public bool IsOwnerAuthoritative => !OnIsServerAuthoritative();
         protected override bool OnIsServerAuthoritative() => false;
     }
 }

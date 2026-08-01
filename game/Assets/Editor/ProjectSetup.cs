@@ -71,7 +71,9 @@ namespace CaseClosed.EditorTools
             camGo.transform.SetParent(player.transform, false);
             camGo.transform.localPosition = new Vector3(0f, 1.6f, 0f);
             camGo.tag = "MainCamera";
-            camGo.AddComponent<Camera>();
+            var cam = camGo.AddComponent<Camera>();
+            cam.clearFlags = CameraClearFlags.SolidColor;      // no skybox — the void is black
+            cam.backgroundColor = new Color(0.008f, 0.008f, 0.012f);
             camGo.AddComponent<AudioListener>();
 
             player.AddComponent<FirstPersonController>();
@@ -105,6 +107,7 @@ namespace CaseClosed.EditorTools
             var systems = new GameObject("GameSystems");
             systems.AddComponent<CaseRuntime>();   // Seed defaults to 2 (THE HUMMUS HEIST)
             systems.AddComponent<HudController>();
+            systems.AddComponent<MpAutoTest>();    // inert unless launched with -mpauto
             var boot = systems.AddComponent<NetworkBootstrapHud>();
             boot.PlayerPrefab = playerPrefab;
         }
