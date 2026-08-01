@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>10</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>CaseClosed.TruthEngine</RootNamespace>
+    <!-- netstandard2.1 so the compiled DLL drops straight into Unity 6 (GDD 12). -->
+    <!-- No Unity references, no external packages. Ever. -->
+  </PropertyGroup>
+
+</Project>

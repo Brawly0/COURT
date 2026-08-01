@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CaseClosed.Console/CaseClosed.Console.csproj" />
+    <Project Path="src/CaseClosed.TruthEngine/CaseClosed.TruthEngine.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CaseClosed.Tests/CaseClosed.Tests.csproj" />
+  </Folder>
+</Solution>
