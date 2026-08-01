@@ -22,6 +22,11 @@ namespace CaseClosed.Game
         public int EvidenceTotal { get; private set; }
         public bool BellRung { get; private set; }
         public readonly List<string> Log = new List<string>();
+        public readonly HashSet<int> Collected = new HashSet<int>();
+
+        // assigned by ProjectSetup - runtime-spawned primitives without explicit
+        // materials render magenta in URP builds
+        public Material EvidenceMat, EvidenceTentMat, WitnessSuitMat, WitnessSkinMat;
 
         public static CaseRuntime Instance { get; private set; }
 
@@ -101,12 +106,35 @@ namespace CaseClosed.Game
             foreach (var item in Case.Evidence)
             {
                 var zone = ZoneFor(item.FoundAt, anchors);
+                Vector3 basePos = zone.position + ScatterOffset(i);
+
+                // the item: a manila evidence envelope (mockup canon)
                 var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 go.name = $"Evidence_{i}";
-                go.transform.localScale = new Vector3(0.45f, 0.45f, 0.45f);
-                go.transform.position = zone.position + ScatterOffset(i);
+                go.transform.localScale = new Vector3(0.5f, 0.36f, 0.14f);
+                go.transform.position = basePos;
+                go.transform.rotation = Quaternion.Euler(0f, i * 47f, 0f);
+                if (EvidenceMat != null) go.GetComponent<Renderer>().sharedMaterial = EvidenceMat;
                 var pickup = go.AddComponent<EvidencePickup>();
                 pickup.Init(i, item.Name);
+
+                // yellow numbered marker tent beside it (mockup canon)
+                var tent = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                tent.name = "Marker";
+                tent.transform.SetParent(go.transform);
+                tent.transform.position = basePos + new Vector3(0.35f, -0.05f, 0.1f);
+                tent.transform.localRotation = Quaternion.Euler(0f, 0f, 12f);
+                tent.transform.localScale = new Vector3(0.5f, 0.75f, 0.35f);
+                UnityEngine.Object.Destroy(tent.GetComponent<Collider>());
+                if (EvidenceTentMat != null) tent.GetComponent<Renderer>().sharedMaterial = EvidenceTentMat;
+                var num = new GameObject("Num").AddComponent<TextMesh>();
+                num.transform.SetParent(tent.transform, false);
+                num.transform.localPosition = new Vector3(0f, 0.2f, -0.55f);
+                num.text = (i + 1).ToString();
+                num.characterSize = 0.14f;
+                num.fontSize = 48;
+                num.anchor = TextAnchor.MiddleCenter;
+                num.color = new Color(0.15f, 0.12f, 0.02f);
                 i++;
             }
         }
@@ -123,6 +151,17 @@ namespace CaseClosed.Game
                 var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 go.name = $"Witness_{witnesses[w]}";
                 go.transform.position = zone.position + ScatterOffset(w + 20) + Vector3.up * 1.0f;
+                if (WitnessSuitMat != null) go.GetComponent<Renderer>().sharedMaterial = WitnessSuitMat;
+
+                // oversized head, tiny-pupil energy (art bible: eyes are the tell channel)
+                var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                head.name = "Head";
+                head.transform.SetParent(go.transform, false);
+                head.transform.localPosition = new Vector3(0f, 0.78f, 0f);
+                head.transform.localScale = new Vector3(0.62f, 0.62f, 0.62f);
+                UnityEngine.Object.Destroy(head.GetComponent<Collider>());
+                if (WitnessSkinMat != null) head.GetComponent<Renderer>().sharedMaterial = WitnessSkinMat;
+
                 var npc = go.AddComponent<WitnessNpc>();
                 npc.Init(witnesses[w], KitWriter.OpeningStatement(Case, witnesses[w]));
             }
@@ -153,6 +192,7 @@ namespace CaseClosed.Game
             if (go == null) return;
             Destroy(go);
             EvidenceFound++;
+            Collected.Add(index);
             AddLog($"+ Collected: {itemName}  ({EvidenceFound}/{EvidenceTotal})");
         }
 

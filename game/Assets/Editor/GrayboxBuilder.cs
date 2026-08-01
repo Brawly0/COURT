@@ -51,7 +51,9 @@ namespace CaseClosed.EditorTools
             // basement plate
             Slab(root, "Basement_Floor", -24, -20, 24, 20, -4, _concrete);
 
-            // F2 / F3 rings: wings + end links around the atrium void (void x[-18,18], z[-6,6])
+            // F2 / F3 rings: wings + end links + BALCONY CORRIDORS in front of the room
+            // doors (doors must open onto a walkway, never onto the void).
+            // Atrium void slot shrinks to x[-18,18], z[-3,3].
             foreach (float fy in new[] { 4f, 8f })
             {
                 string p = fy < 6 ? "F2" : "F3";
@@ -59,6 +61,8 @@ namespace CaseClosed.EditorTools
                 Slab(root, p + "_SouthWing", -24, -20, 24, -6, fy, _tile);
                 Slab(root, p + "_WestLink", -24, -6, -18, 6, fy, _tile);
                 Slab(root, p + "_EastLink", 18, -6, 24, 6, fy, _tile);
+                Slab(root, p + "_NorthBalcony", -18, 3, 18, 6, fy, _tileHall);
+                Slab(root, p + "_SouthBalcony", -18, -6, 18, -3, fy, _tileHall);
             }
 
             // roof + garage roofs + earth
@@ -113,7 +117,7 @@ namespace CaseClosed.EditorTools
             Slab(root, "Stairs_G_Base", -15, -2.5f, -14, 2.5f, 0, _tileHall);       // seals the well's west edge
             RampRailed(root, "Stairs_G_to_F2", new Vector3(-14, 0, 0), new Vector3(-2, 4, 0), 4.5f, _tileHall);
             Slab(root, "Landing_F2", -2, -2.5f, 3, 2.5f, 4, _tileHall);             // mid-air landing over the hall
-            Slab(root, "Bridge_F2_North", -1.5f, 2.5f, 1.5f, 6, 4, _tileHall);      // landing -> F2 north wing
+            Slab(root, "Bridge_F2_North", -1.5f, 2.5f, 1.5f, 3, 4, _tileHall);      // landing -> F2 north balcony
             RampRailed(root, "Stairs_F2_to_F3", new Vector3(3, 4, 0), new Vector3(15, 8, 0), 4.5f, _tileHall);
             Slab(root, "Bridge_F3_East", 15, -2, 18, 2, 8, _tileHall);              // flight top -> F3 east link
 
@@ -125,14 +129,14 @@ namespace CaseClosed.EditorTools
             RailX(root, 2.5f, -14.5f, -1.5f, new List<(float, float)>(), 0);
             RailX(root, -2.5f, -14.5f, -1.5f, new List<(float, float)>(), 0);
 
-            // atrium void edge rails
-            RailX(root, 6, -18, 18, new List<(float, float)> { (0f, 3.4f) }, 4);    // F2 north: bridge gap
-            RailX(root, -6, -18, 18, new List<(float, float)>(), 4);
-            RailSegZ(root, -18, -6, 6, 4); RailSegZ(root, 18, -6, 6, 4);
-            RailX(root, 6, -18, 18, new List<(float, float)>(), 8);
-            RailX(root, -6, -18, 18, new List<(float, float)>(), 8);
-            RailSegZ(root, -18, -6, 6, 8);
-            RailSegZ(root, 18, -6, -2, 8); RailSegZ(root, 18, 2, 6, 8);             // F3 east: bridge gap
+            // atrium void edge rails, on the BALCONY edges (z = +-3)
+            RailX(root, 3, -18, 18, new List<(float, float)> { (0f, 3.4f) }, 4);    // F2 north: bridge gap
+            RailX(root, -3, -18, 18, new List<(float, float)>(), 4);
+            RailSegZ(root, -18, -3, 3, 4); RailSegZ(root, 18, -3, 3, 4);
+            RailX(root, 3, -18, 18, new List<(float, float)>(), 8);
+            RailX(root, -3, -18, 18, new List<(float, float)>(), 8);
+            RailSegZ(root, -18, -3, 3, 8);
+            RailSegZ(root, 18, -3, -2, 8); RailSegZ(root, 18, 2, 3, 8);             // F3 east: bridge gap
 
             // ---------------- zone anchors ----------------
             Anchor(root, "MainHall", 10, 0, 0);
@@ -211,6 +215,12 @@ namespace CaseClosed.EditorTools
             _screen = MatEmissive("Screen", new Color(0.1f, 0.2f, 0.12f), new Color(0.25f, 0.9f, 0.35f));
             _redAccent = MatEmissive("RedAccent", new Color(0.45f, 0.07f, 0.05f), new Color(0.55f, 0.06f, 0.04f));
             _yellow = Mat("CautionYellow", new Color(0.75f, 0.62f, 0.10f));
+            // runtime-spawn materials (assigned to CaseRuntime by ProjectSetup —
+            // unassigned primitives go magenta in builds)
+            Mat("Manila", new Color(0.78f, 0.68f, 0.45f));
+            Mat("EvidenceYellow", new Color(0.88f, 0.72f, 0.12f));
+            Mat("Suit", new Color(0.13f, 0.13f, 0.16f));
+            Mat("Skin", new Color(0.80f, 0.62f, 0.48f));
         }
 
         private static Material MatEmissive(string name, Color baseCol, Color emission)
@@ -485,11 +495,12 @@ namespace CaseClosed.EditorTools
                     Box(g, "VendingGlow", new Vector3(r.X1 - 1.1f, y + 1.2f, r.Z1 - 1.62f), new Vector3(0.7f, 1.2f, 0.06f), _screen);
                     break;
                 case "Security":
-                    Box(g, "Console", new Vector3(cx, y + 0.5f, r.Z1 - 1.1f), new Vector3(6.5f, 1.0f, 1.0f), _metal);
+                    // console lives on the SOUTH wall - the door is on the north wall
+                    Box(g, "Console", new Vector3(cx, y + 0.5f, r.Z0 + 1.1f), new Vector3(6.5f, 1.0f, 1.0f), _metal);
                     for (int s = 0; s < 6; s++)
-                        Box(g, "Monitor", new Vector3(cx - 2.9f + s * 1.15f, y + 1.5f, r.Z1 - 0.8f),
+                        Box(g, "Monitor", new Vector3(cx - 2.9f + s * 1.15f, y + 1.5f, r.Z0 + 0.8f),
                             new Vector3(0.95f, 0.7f, 0.08f), _screen);
-                    Box(g, "Chair", new Vector3(cx, y + 0.32f, r.Z1 - 2.4f), new Vector3(0.55f, 0.64f, 0.55f), _wood);
+                    Box(g, "Chair", new Vector3(cx, y + 0.32f, r.Z0 + 2.4f), new Vector3(0.55f, 0.64f, 0.55f), _wood);
                     break;
                 case "HoldingCells":
                     for (int cell = 0; cell < 2; cell++)
@@ -528,7 +539,8 @@ namespace CaseClosed.EditorTools
                     bucket.GetComponent<Renderer>().sharedMaterial = _yellow;
                     break;
                 case "PressRoom":
-                    Box(g, "Podium", new Vector3(cx, y + 0.6f, r.Z1 - 1.4f), new Vector3(0.9f, 1.2f, 0.7f), _wood);
+                    // podium on the SOUTH wall - the door is on the north wall
+                    Box(g, "Podium", new Vector3(cx, y + 0.6f, r.Z0 + 1.4f), new Vector3(0.9f, 1.2f, 0.7f), _wood);
                     for (int row = 0; row < 3; row++)
                         for (int c2 = 0; c2 < 4; c2++)
                             Box(g, "Chair", new Vector3(cx - 4.5f + c2 * 3f, y + 0.32f, cz - 2f + row * 1.6f),

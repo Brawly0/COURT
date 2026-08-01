@@ -66,6 +66,8 @@ namespace CaseClosed.EditorTools
             visual.transform.SetParent(player.transform, false);
             visual.transform.localPosition = new Vector3(0f, 0.9f, 0f);
             visual.transform.localScale = new Vector3(0.7f, 0.9f, 0.7f);
+            var suit = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Suit.mat");
+            if (suit != null) visual.GetComponent<Renderer>().sharedMaterial = suit;
 
             var camGo = new GameObject("Camera");
             camGo.transform.SetParent(player.transform, false);
@@ -105,7 +107,11 @@ namespace CaseClosed.EditorTools
         private static void BuildGameSystems(GameObject playerPrefab)
         {
             var systems = new GameObject("GameSystems");
-            systems.AddComponent<CaseRuntime>();   // Seed defaults to 2 (THE HUMMUS HEIST)
+            var runtime = systems.AddComponent<CaseRuntime>();   // Seed defaults to 2 (THE HUMMUS HEIST)
+            runtime.EvidenceMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Manila.mat");
+            runtime.EvidenceTentMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/EvidenceYellow.mat");
+            runtime.WitnessSuitMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Suit.mat");
+            runtime.WitnessSkinMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Skin.mat");
             systems.AddComponent<HudController>();
             systems.AddComponent<MpAutoTest>();    // inert unless launched with -mpauto
             var boot = systems.AddComponent<NetworkBootstrapHud>();
