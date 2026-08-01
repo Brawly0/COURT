@@ -35,7 +35,7 @@ namespace CaseClosed.Game
             }
             if (GUI.Button(new Rect(x, y + 108f, w, h), "PLAY OFFLINE", style))
             {
-                var player = Instantiate(PlayerPrefab, new Vector3(6f, 0.1f, 0f),
+                var player = Instantiate(PlayerPrefab, new Vector3(12f, 0.1f, 0f),
                     Quaternion.Euler(0f, -90f, 0f));
                 player.name = "Player (offline)";
                 var netObj = player.GetComponent<NetworkObject>();

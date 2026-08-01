@@ -18,8 +18,8 @@ namespace CaseClosed.Game
 
             if (IsOwner)
             {
-                // hall spawn, staggered so players don't share a skeleton
-                transform.position = new Vector3(6f, 0.1f, ((int)OwnerClientId % 5) * 1.2f - 2.4f);
+                // hall spawn (east of the grand staircase), staggered per client
+                transform.position = new Vector3(12f, 0.1f, ((int)OwnerClientId % 5) * 1.4f - 2.8f);
                 transform.rotation = Quaternion.Euler(0f, -90f, 0f);
                 return;
             }

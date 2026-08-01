@@ -87,7 +87,7 @@ namespace CaseClosed.Game
 
             var nm = Unity.Netcode.NetworkManager.Singleton;
             int seat = nm != null && nm.IsListening ? (int)nm.LocalClientId : 0;
-            var pos = new Vector3(2.8f + (seat % 4) * 2.4f, 0.15f, 4.9f + (seat / 4) * 1.3f);
+            var pos = new Vector3(4.5f + (seat % 4) * 3.8f, 0.15f, 7.9f + (seat / 4) * 1.5f);
 
             var cc = fpc.GetComponent<CharacterController>();
             if (cc != null) cc.enabled = false;              // CC stomps teleports; toggle around it
