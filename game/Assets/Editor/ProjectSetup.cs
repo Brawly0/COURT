@@ -55,7 +55,7 @@ namespace CaseClosed.EditorTools
         }
 
         /// <summary>Mockup-canon post: vignette + film grain + slight desaturation.</summary>
-        private static void BuildPostFx()
+        internal static void BuildPostFx()
         {
             const string path = "Assets/Settings/CourthouseVolume.asset";
             AssetDatabase.DeleteAsset(path);
@@ -82,7 +82,7 @@ namespace CaseClosed.EditorTools
             vol.sharedProfile = profile;
         }
 
-        private static GameObject BuildPlayerPrefab()
+        internal static GameObject BuildPlayerPrefab()
         {
             var player = new GameObject("Player");
 
@@ -105,7 +105,7 @@ namespace CaseClosed.EditorTools
             camGo.transform.localPosition = new Vector3(0f, 1.6f, 0f);
             camGo.tag = "MainCamera";
             var cam = camGo.AddComponent<Camera>();
-            cam.clearFlags = CameraClearFlags.SolidColor;      // no skybox — the void is black
+            cam.clearFlags = CameraClearFlags.SolidColor;      // no skybox - the void is black
             cam.backgroundColor = new Color(0.008f, 0.008f, 0.012f);
             var camData = cam.GetUniversalAdditionalCameraData();
             camData.renderPostProcessing = true;               // vignette + grain live here
@@ -124,7 +124,7 @@ namespace CaseClosed.EditorTools
             return prefab;
         }
 
-        private static void BuildNetwork(GameObject playerPrefab)
+        internal static void BuildNetwork(GameObject playerPrefab)
         {
             var nmGo = new GameObject("NetworkManager");
             var nm = nmGo.AddComponent<NetworkManager>();
@@ -137,8 +137,13 @@ namespace CaseClosed.EditorTools
             syncGo.AddComponent<CaseNetSync>();
         }
 
-        private static void BuildGameSystems(GameObject playerPrefab)
+        internal static void BuildGameSystems(GameObject playerPrefab)
         {
+            if (GameObject.Find("SpawnPoint") == null)
+            {
+                var sp = new GameObject("SpawnPoint");
+                sp.transform.position = new Vector3(12f, 0.1f, 0f);   // procedural hall default
+            }
             var systems = new GameObject("GameSystems");
             var runtime = systems.AddComponent<CaseRuntime>();   // Seed defaults to 2 (THE HUMMUS HEIST)
             runtime.EvidenceMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Manila.mat");

@@ -92,7 +92,10 @@ namespace CaseClosed.Game
 
             var nm = Unity.Netcode.NetworkManager.Singleton;
             int seat = nm != null && nm.IsListening ? (int)nm.LocalClientId : 0;
-            var pos = new Vector3(4.5f + (seat % 4) * 3.8f, 0.15f, 7.9f + (seat / 4) * 1.5f);
+            // seat everyone relative to the courtroom's anchor - works in any building
+            var anchor = FindObjectsByType<ZoneAnchor>().FirstOrDefault(a => a.ZoneName == "CourtroomA");
+            var courtCenter = anchor != null ? anchor.transform.position : new Vector3(11f, 0f, 14f);
+            var pos = courtCenter + new Vector3((seat % 4) * 2.6f - 3.9f, 0.15f, -5f + (seat / 4) * 1.5f);
 
             var cc = fpc.GetComponent<CharacterController>();
             if (cc != null) cc.enabled = false;              // CC stomps teleports; toggle around it

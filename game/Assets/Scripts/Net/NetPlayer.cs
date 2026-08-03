@@ -18,8 +18,10 @@ namespace CaseClosed.Game
 
             if (IsOwner)
             {
-                // hall spawn (east of the grand staircase), staggered per client
-                transform.position = new Vector3(12f, 0.1f, ((int)OwnerClientId % 5) * 1.4f - 2.8f);
+                // spawn at the scene's SpawnPoint (works in any building), staggered per client
+                var sp = GameObject.Find("SpawnPoint");
+                var basePos = sp != null ? sp.transform.position : new Vector3(12f, 0.1f, 0f);
+                transform.position = basePos + new Vector3(0f, 0f, ((int)OwnerClientId % 5) * 1.4f - 2.8f);
                 transform.rotation = Quaternion.Euler(0f, -90f, 0f);
                 return;
             }
