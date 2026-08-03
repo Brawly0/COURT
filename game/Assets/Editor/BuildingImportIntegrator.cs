@@ -52,19 +52,26 @@ namespace CaseClosed.EditorTools
                 if (mf.sharedMesh != null && mf.GetComponent<Collider>() == null)
                 { mf.gameObject.AddComponent<MeshCollider>(); colliders++; }
 
-            // ---- theme material mapping (keyword heuristics on renderer + material names) ----
+            // ---- theme material mapping ----
+            // Ordered, first-match-wins. Tuned against omarproject's real Revit
+            // categories: "Basic Wall Generic - 140mm Masonry" (interior) vs
+            // "- 300mm" (exterior shell), "Floor Standard Timber-Wood Finish",
+            // "Assembled Stair"/"Non-Monolithic Run"/"Carriage", "Columns N",
+            // "Railing 1100mm", "Top Rail Type Rectangular".
             var map = new (string[] keys, string mat)[]
             {
                 (new[] { "glass", "window", "glazing", "curtain" }, "Glass"),
                 (new[] { "carpet" }, "Carpet"),
-                (new[] { "roof" }, "PlasterLight"),
-                (new[] { "ceiling" }, "PlasterLight"),
-                (new[] { "floor", "slab", "tile" }, "FloorTileHall"),
-                (new[] { "brick", "masonry" }, "Brick"),
-                (new[] { "concrete", "foundation", "cement" }, "Concrete"),
-                (new[] { "door", "wood", "timber", "oak", "walnut" }, "WoodDark"),
-                (new[] { "metal", "steel", "rail", "alum", "chrome" }, "Metal"),
-                (new[] { "wall", "plaster", "gypsum", "paint", "stucco" }, "Plaster"),
+                (new[] { "timber", "wood", "oak", "walnut", "door" }, "WoodDark"),   // before "floor"
+                (new[] { "stair", "run", "landing", "carriage", "tread" }, "WoodDark"),
+                (new[] { "railing", "top rail", "handrail", "balustrade" }, "WoodDark"),
+                (new[] { "300mm", "exterior", "brick", "masonry wall" }, "Brick"),   // thick = outer shell
+                (new[] { "roof", "ceiling" }, "PlasterLight"),
+                (new[] { "column", "pilaster" }, "Plaster"),   // ceiling-tile grid on columns looked wrong
+                (new[] { "floor", "slab" }, "FloorTileHall"),
+                (new[] { "foundation", "concrete", "cement", "footing" }, "Concrete"),
+                (new[] { "metal", "steel", "alum", "chrome" }, "Metal"),
+                (new[] { "wall", "masonry", "plaster", "gypsum", "paint", "stucco", "partition" }, "Plaster"),
             };
             var cache = new Dictionary<string, Material>();
             Material Load(string n) => cache.TryGetValue(n, out var m) ? m
@@ -86,39 +93,102 @@ namespace CaseClosed.EditorTools
             }
             Debug.Log($"[CaseClosed] colliders added: {colliders}, material slots themed: {themed}");
 
+            // world-space texture density on every imported surface, so a 45m
+            // wall and a stair tread read at the same texel scale
+            foreach (var r in building.GetComponentsInChildren<Renderer>())
+            {
+                var s = r.bounds.size;
+                float u, v;
+                if (s.y <= s.x && s.y <= s.z) { u = s.x / 2f; v = s.z / 2f; }
+                else if (s.z <= s.x && s.z <= s.y) { u = s.x / 2f; v = s.y / 2f; }
+                else { u = s.z / 2f; v = s.y / 2f; }
+                var mpb = new MaterialPropertyBlock();
+                mpb.SetVector("_BaseMap_ST", new Vector4(Mathf.Clamp(u, 0.5f, 40f), Mathf.Clamp(v, 0.5f, 40f), 0f, 0f));
+                r.SetPropertyBlock(mpb);
+            }
+
             // ---- theme atmosphere ----
             RenderSettings.skybox = null;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.10f, 0.105f, 0.12f);
+            RenderSettings.ambientLight = new Color(0.045f, 0.048f, 0.058f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Exponential;
-            RenderSettings.fogColor = new Color(0.015f, 0.015f, 0.02f);
-            RenderSettings.fogDensity = 0.012f;
+            RenderSettings.fogColor = new Color(0.012f, 0.012f, 0.016f);
+            RenderSettings.fogDensity = 0.030f;   // corridors fall into darkness
+
+            // ---- detect the model's real floor levels from its slabs ----
+            var levels = building.GetComponentsInChildren<Renderer>()
+                .Where(r => r.gameObject.name.Contains("Floor"))
+                .Select(r => Mathf.Round(r.bounds.max.y * 10f) / 10f)
+                .Distinct().OrderBy(v => v).ToList();
+            // omarproject is pilotis: open at grade, slabs only at 3.4m / 7.4m.
+            // Give the ground level a slab so it is walkable (it becomes the garage).
+            if (levels.Count == 0 || levels[0] > b.min.y + 1.5f)
+            {
+                var ground = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                ground.name = "GroundSlab";
+                ground.transform.position = new Vector3(b.center.x, b.min.y - 0.15f, b.center.z);
+                ground.transform.localScale = new Vector3(b.size.x + 1.0f, 0.3f, b.size.z + 1.0f);
+                var cm = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Concrete.mat");
+                if (cm != null) ground.GetComponent<Renderer>().sharedMaterial = cm;
+                levels.Insert(0, b.min.y);
+            }
+            Debug.Log("[CaseClosed] floor levels: " + string.Join(", ", levels.Select(v => v.ToString("F1") + "m")));
+
+            // ---- roof cap (Revit structural exports have no roof) ----
+            var roof = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            roof.name = "RoofCap";
+            roof.transform.position = new Vector3(b.center.x, b.max.y + 0.15f, b.center.z);
+            roof.transform.localScale = new Vector3(b.size.x + 1.5f, 0.3f, b.size.z + 1.5f);
+            var roofMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/PlasterLight.mat");
+            if (roofMat != null) roof.GetComponent<Renderer>().sharedMaterial = roofMat;
 
             // ---- interior light scatter + interior point collection ----
-            var interior = ScatterLights(b);
+            var interior = ScatterLights(b, levels);
 
-            // ---- zone anchors spread across the interior (drag Anchor_* to refine!) ----
-            string[] zones = { "MainHall", "CourtroomA", "EvidenceLocker", "Security", "Cafeteria",
-                               "ParkingGarage", "Lab", "Maintenance", "HoldingCells", "BoilerRoom",
-                               "ProsecutionOffice", "Archives", "RecordsRoom", "DefenseOffice",
-                               "CourtroomB", "JudgeChambers", "StaffRoom", "PressRoom" };
-            var anchorRoot = new GameObject("Anchors");
-            var spread = SpreadPoints(interior, zones.Length, b);
-            for (int i = 0; i < zones.Length; i++)
+            // ---- zone anchors by storey (drag Anchor_* in the editor to refine) ----
+            // Storey 0 = service/vehicles, storey 1 = the public floor (hall +
+            // courtroom, so the trial teleport lands where players already are),
+            // storey 2+ = offices and archives.
+            var byStorey = new[]
             {
-                var a = new GameObject("Anchor_" + zones[i]);
-                a.transform.SetParent(anchorRoot.transform);
-                a.transform.position = spread[i];
-                a.AddComponent<ZoneAnchor>().ZoneName = zones[i];
+                new[] { "ParkingGarage", "BoilerRoom", "Maintenance", "HoldingCells" },
+                new[] { "MainHall", "CourtroomA", "EvidenceLocker", "Security", "Cafeteria", "Lab" },
+                new[] { "ProsecutionOffice", "DefenseOffice", "Archives", "RecordsRoom",
+                        "JudgeChambers", "StaffRoom", "PressRoom", "CourtroomB" },
+            };
+            var anchorRoot = new GameObject("Anchors");
+            var floorGroups = interior.GroupBy(p => Mathf.Round(p.y * 2f) / 2f)
+                                      .OrderBy(gr => gr.Key)
+                                      .Select(gr => gr.ToList()).ToList();
+            for (int s = 0; s < byStorey.Length; s++)
+            {
+                var zones = byStorey[s];
+                var pts = floorGroups.Count > 0
+                    ? floorGroups[Mathf.Min(s, floorGroups.Count - 1)]
+                    : new List<Vector3> { b.center };
+                var spread = SpreadPoints(pts, zones.Length, b);
+                for (int i = 0; i < zones.Length; i++)
+                {
+                    var a = new GameObject("Anchor_" + zones[i]);
+                    a.transform.SetParent(anchorRoot.transform);
+                    a.transform.position = spread[i % spread.Count] + Vector3.up * 0.2f;
+                    a.AddComponent<ZoneAnchor>().ZoneName = zones[i];
+                }
             }
 
-            // ---- spawn point: the biggest ground-floor cluster ----
-            var spawnPos = interior.Count > 0
-                ? interior.Where(p => p.y < b.min.y + 2.5f).DefaultIfEmpty(interior[0]).First()
-                : Vector3.zero;
+            // ---- spawn point: centre of the public floor (storey 1 if it exists) ----
+            Vector3 spawnPos = b.center;
+            if (interior.Count > 0)
+            {
+                var groups = interior.GroupBy(p => Mathf.Round(p.y * 2f) / 2f)
+                                     .OrderBy(gr => gr.Key).Select(gr => gr.ToList()).ToList();
+                var pub = groups[Mathf.Min(1, groups.Count - 1)];
+                var mid = new Vector3(pub.Average(p => p.x), pub[0].y, pub.Average(p => p.z));
+                spawnPos = pub.OrderBy(p => (p - mid).sqrMagnitude).First();
+            }
             var spawn = new GameObject("SpawnPoint");
-            spawn.transform.position = spawnPos + Vector3.up * 0.15f;
+            spawn.transform.position = spawnPos + Vector3.up * 0.2f;
 
             // ---- systems (shared with the procedural scene) ----
             ProjectSetup.BuildPostFx();
@@ -147,36 +217,54 @@ namespace CaseClosed.EditorTools
             return b;
         }
 
-        /// <summary>Grid-scan the volume; where a floor has a ceiling 2-6m above, it's a room -> light it.</summary>
-        private static List<Vector3> ScatterLights(Bounds b)
+        /// <summary>
+        /// Walk each detected floor level on a grid; wherever solid floor is
+        /// underfoot, record a standable point and hang a fluorescent fixture.
+        /// Driven by the model's real slabs rather than blind raycast guessing.
+        /// </summary>
+        private static List<Vector3> ScatterLights(Bounds b, List<float> levels)
         {
             var lightsRoot = new GameObject("ScatteredLights");
             var interior = new List<Vector3>();
+            var tubeMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/TubeLight.mat");
             int placed = 0;
-            for (float x = b.min.x + 3f; x < b.max.x - 2f && placed < 140; x += 7f)
-                for (float z = b.min.z + 3f; z < b.max.z - 2f && placed < 140; z += 7f)
-                {
-                    var hits = Physics.RaycastAll(new Vector3(x, b.max.y + 2f, z), Vector3.down, b.size.y + 4f)
-                        .OrderBy(hh => hh.point.y).ToArray();
-                    // walk floor surfaces bottom-up; a hit with another surface 2-6m above = interior
-                    for (int i = 0; i < hits.Length; i++)
+            Physics.SyncTransforms();   // colliders created this frame are invisible to raycasts otherwise
+
+            foreach (float level in levels)
+            {
+                float headroom = levels.Where(v => v > level + 1.5f)
+                                       .DefaultIfEmpty(b.max.y).First() - level;
+                float lampY = level + Mathf.Min(2.6f, headroom - 0.5f);
+                for (float x = b.min.x + 2f; x < b.max.x - 1f; x += 4.5f)
+                    for (float z = b.min.z + 2f; z < b.max.z - 1f; z += 4.5f)
                     {
-                        float floorY = hits[i].point.y;
-                        bool hasCeiling = hits.Any(hh => hh.point.y > floorY + 2.0f && hh.point.y < floorY + 6.0f);
-                        if (!hasCeiling || hits[i].normal.y < 0.7f) continue;
-                        interior.Add(new Vector3(x, floorY, z));
+                        // is there floor directly underfoot at this level?
+                        if (!Physics.Raycast(new Vector3(x, level + 1.2f, z), Vector3.down, out var hit, 2.2f))
+                            continue;
+                        if (Mathf.Abs(hit.point.y - level) > 0.4f || hit.normal.y < 0.6f) continue;
+
+                        interior.Add(new Vector3(x, hit.point.y, z));
+                        // dim + short range: 130 overlapping lamps washed the interior
+                        // out; the mockups are dark with pools of fluorescent light
                         var l = new GameObject($"Lamp_{placed}").AddComponent<Light>();
                         l.type = LightType.Point;
-                        l.range = 12f;
-                        l.intensity = 3.6f;
-                        l.color = new Color(1f, 0.92f, 0.74f);
+                        l.range = 7.5f;
+                        l.intensity = 1.5f;
+                        l.color = new Color(1f, 0.94f, 0.80f);
                         l.transform.SetParent(lightsRoot.transform);
-                        l.transform.position = new Vector3(x, floorY + 2.6f, z);
+                        l.transform.position = new Vector3(x, lampY, z);
+
+                        var tube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        tube.name = "Tube";
+                        tube.transform.SetParent(lightsRoot.transform);
+                        tube.transform.position = new Vector3(x, lampY + 0.35f, z);
+                        tube.transform.localScale = new Vector3(2.2f, 0.06f, 0.18f);
+                        UnityEngine.Object.DestroyImmediate(tube.GetComponent<Collider>());
+                        if (tubeMat != null) tube.GetComponent<Renderer>().sharedMaterial = tubeMat;
                         placed++;
-                        i += 1; // skip the ceiling surface itself
                     }
-                }
-            Debug.Log($"[CaseClosed] interior lights placed: {placed}");
+            }
+            Debug.Log($"[CaseClosed] interior lights placed: {placed} across {levels.Count} levels");
             return interior;
         }
 
@@ -190,17 +278,23 @@ namespace CaseClosed.EditorTools
                     result.Add(b.center + new Vector3(Mathf.Cos(i * 2.4f), 0, Mathf.Sin(i * 2.4f)) * (2f + i));
                 return result;
             }
-            result.Add(pts[0]);
-            while (result.Count < n)
+            var pool = new List<Vector3>(pts);
+            result.Add(pool[0]);
+            pool.RemoveAt(0);
+            while (result.Count < n && pool.Count > 0)
             {
-                Vector3 best = pts[0]; float bestD = -1f;
-                foreach (var p in pts)
+                int bestIdx = 0; float bestD = -1f;
+                for (int i = 0; i < pool.Count; i++)
                 {
-                    float d = result.Min(q => (p - q).sqrMagnitude);
-                    if (d > bestD) { bestD = d; best = p; }
+                    float d = result.Min(q => (pool[i] - q).sqrMagnitude);
+                    if (d > bestD) { bestD = d; bestIdx = i; }
                 }
-                result.Add(best);
+                result.Add(pool[bestIdx]);
+                pool.RemoveAt(bestIdx);      // never hand out the same spot twice
             }
+            // if the floor had fewer standable points than zones, jitter the reuse
+            for (int i = result.Count; i < n; i++)
+                result.Add(result[i % result.Count] + new Vector3((i % 3) * 1.6f - 1.6f, 0f, (i % 2) * 1.6f - 0.8f));
             return result;
         }
     }

@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/CourthouseRVT.unity
+    guid: f35f001ff2228544ca0c44ccfee6be47
+  - enabled: 1
     path: Assets/Scenes/Courthouse.unity
     guid: 68b18e4839b3fda4daf47dc40f6f11be
   m_configObjects:
