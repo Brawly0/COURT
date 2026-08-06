@@ -218,54 +218,99 @@ namespace CaseClosed.EditorTools
         }
 
         /// <summary>
-        /// Walk each detected floor level on a grid; wherever solid floor is
-        /// underfoot, record a standable point and hang a fluorescent fixture.
-        /// Driven by the model's real slabs rather than blind raycast guessing.
+        /// Walk each detected floor level on a grid. A lamp exists ONLY where a
+        /// raycast finds BOTH solid floor underfoot AND a real ceiling overhead,
+        /// and the fixture mounts FLUSH to that ceiling. (v1 hung tubes at a
+        /// fixed height with no ceiling check - they floated mid-air over the
+        /// parking lot and open terraces.) Spacing is wide on purpose: the PSX
+        /// look is pools of warm fluorescent light with dark stretches between,
+        /// not an evenly lit office.
         /// </summary>
         private static List<Vector3> ScatterLights(Bounds b, List<float> levels)
         {
+            var old = GameObject.Find("ScatteredLights");
+            if (old != null) UnityEngine.Object.DestroyImmediate(old);
             var lightsRoot = new GameObject("ScatteredLights");
             var interior = new List<Vector3>();
+            var accepted = new List<Vector3>();
             var tubeMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/TubeLight.mat");
-            int placed = 0;
+            int placed = 0, openAir = 0;
+            const float Spacing = 7.5f, MinSep = 6f;
             Physics.SyncTransforms();   // colliders created this frame are invisible to raycasts otherwise
 
             foreach (float level in levels)
             {
-                float headroom = levels.Where(v => v > level + 1.5f)
-                                       .DefaultIfEmpty(b.max.y).First() - level;
-                float lampY = level + Mathf.Min(2.6f, headroom - 0.5f);
-                for (float x = b.min.x + 2f; x < b.max.x - 1f; x += 4.5f)
-                    for (float z = b.min.z + 2f; z < b.max.z - 1f; z += 4.5f)
+                for (float x = b.min.x + 2f; x < b.max.x - 1f; x += Spacing)
+                    for (float z = b.min.z + 2f; z < b.max.z - 1f; z += Spacing)
                     {
-                        // is there floor directly underfoot at this level?
-                        if (!Physics.Raycast(new Vector3(x, level + 1.2f, z), Vector3.down, out var hit, 2.2f))
+                        // solid floor directly underfoot at this level?
+                        if (!Physics.Raycast(new Vector3(x, level + 1.2f, z), Vector3.down, out var floorHit, 2.2f))
                             continue;
-                        if (Mathf.Abs(hit.point.y - level) > 0.4f || hit.normal.y < 0.6f) continue;
+                        if (Mathf.Abs(floorHit.point.y - level) > 0.4f || floorHit.normal.y < 0.6f) continue;
 
-                        interior.Add(new Vector3(x, hit.point.y, z));
-                        // dim + short range: 130 overlapping lamps washed the interior
-                        // out; the mockups are dark with pools of fluorescent light
+                        // a real ceiling overhead? no ceiling, no lamp - and no
+                        // anchor either (open terraces aren't interior space)
+                        if (!Physics.Raycast(new Vector3(x, floorHit.point.y + 1.6f, z), Vector3.up, out var ceil, 8f)
+                            || ceil.normal.y > -0.3f)
+                        {
+                            openAir++;
+                            continue;
+                        }
+
+                        interior.Add(new Vector3(x, floorHit.point.y, z));
+
+                        // keep lamps apart - pools, not floodlighting
+                        bool tooClose = false;
+                        foreach (var a in accepted)
+                            if (Mathf.Abs(a.y - floorHit.point.y) < 1.5f &&
+                                new Vector2(a.x - x, a.z - z).sqrMagnitude < MinSep * MinSep)
+                            { tooClose = true; break; }
+                        if (tooClose) continue;
+                        accepted.Add(new Vector3(x, floorHit.point.y, z));
+
+                        float ceilY = ceil.point.y;
                         var l = new GameObject($"Lamp_{placed}").AddComponent<Light>();
                         l.type = LightType.Point;
-                        l.range = 7.5f;
-                        l.intensity = 1.5f;
-                        l.color = new Color(1f, 0.94f, 0.80f);
+                        l.range = 11f;
+                        l.intensity = 2.1f;
+                        // aged fluorescents drift in colour - deterministic per position
+                        float drift = Mathf.Abs((x * 7f + z * 13f) % 10f) / 10f;
+                        l.color = Color.Lerp(new Color(1f, 0.93f, 0.78f), new Color(0.92f, 0.97f, 0.86f), drift);
                         l.transform.SetParent(lightsRoot.transform);
-                        l.transform.position = new Vector3(x, lampY, z);
+                        l.transform.position = new Vector3(x, ceilY - 0.45f, z);
 
                         var tube = GameObject.CreatePrimitive(PrimitiveType.Cube);
                         tube.name = "Tube";
                         tube.transform.SetParent(lightsRoot.transform);
-                        tube.transform.position = new Vector3(x, lampY + 0.35f, z);
-                        tube.transform.localScale = new Vector3(2.2f, 0.06f, 0.18f);
+                        tube.transform.position = new Vector3(x, ceilY - 0.05f, z);   // flush to the ceiling
+                        tube.transform.localScale = new Vector3(2.2f, 0.07f, 0.18f);
                         UnityEngine.Object.DestroyImmediate(tube.GetComponent<Collider>());
                         if (tubeMat != null) tube.GetComponent<Renderer>().sharedMaterial = tubeMat;
                         placed++;
                     }
             }
-            Debug.Log($"[CaseClosed] interior lights placed: {placed} across {levels.Count} levels");
+            Debug.Log($"[CaseClosed] ceiling lights placed: {placed} (skipped {openAir} open-air points) across {levels.Count} levels");
             return interior;
+        }
+
+        /// <summary>Re-run just the light pass on the already-integrated scene.</summary>
+        [MenuItem("Case Closed/Rebuild Ceiling Lights")]
+        public static void RebuildLights()
+        {
+            var building = GameObject.Find("OmarBuilding");
+            if (building == null) { Debug.LogError("[CaseClosed] OmarBuilding not found in the scene"); return; }
+            var rends = building.GetComponentsInChildren<Renderer>();
+            var b = rends[0].bounds;
+            foreach (var r in rends) b.Encapsulate(r.bounds);
+
+            var levels = rends.Where(r => r.gameObject.name.Contains("Floor"))
+                .Select(r => Mathf.Round(r.bounds.max.y * 10f) / 10f)
+                .Distinct().OrderBy(v => v).ToList();
+            if (levels.Count == 0 || levels[0] > b.min.y + 1.5f) levels.Insert(0, b.min.y);
+
+            ScatterLights(b, levels);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+                UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene());
         }
 
         /// <summary>Pick n interior points far apart from each other (greedy max-min spread).</summary>
