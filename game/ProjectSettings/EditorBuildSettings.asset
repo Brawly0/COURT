@@ -8,5 +8,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Courthouse.unity
     guid: 68b18e4839b3fda4daf47dc40f6f11be
+  - enabled: 1
+    path: Assets/Scenes/MovementPlayground.unity
+    guid: e910f94233310df49a1fd337c9ff2710
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

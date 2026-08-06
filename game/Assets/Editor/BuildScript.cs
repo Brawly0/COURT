@@ -26,7 +26,7 @@ namespace CaseClosed.EditorTools
 
             var opts = new BuildPlayerOptions
             {
-                scenes = new[] { "Assets/Scenes/Courthouse.unity" },
+                scenes = new[] { CaseClosed.EditorTools.Greybox.CourthouseBuilder.ScenePath },
                 locationPathName = "Build/CaseClosed.exe",
                 target = BuildTarget.StandaloneWindows64,
                 options = BuildOptions.None,
