@@ -14,6 +14,9 @@ namespace CaseClosed.Game
     {
         [Range(0f, 1f)] public float Stress;
         public Transform LookTarget;
+        /// <summary>Vertical look angle (deg, +down). Owner feeds it from the
+        /// controller; NetPlayer replicates it so everyone sees heads tilt.</summary>
+        public float LookPitch;
 
         private CharacterBuilder.Rig _rig;
         private float _phase, _speed01, _blinkTimer, _blinkT, _dartTimer;
@@ -72,7 +75,9 @@ namespace CaseClosed.Game
             // ---- head: look target, bob, stress twitch ----
             if (_rig.HeadPivot)
             {
-                Quaternion want = Quaternion.identity;
+                // no explicit target: head follows the owner's look pitch,
+                // damped so the puppet reads as glancing, not neck-snapping
+                Quaternion want = Quaternion.Euler(Mathf.Clamp(LookPitch, -65f, 65f) * 0.8f, 0f, 0f);
                 if (LookTarget != null)
                 {
                     Vector3 dir = LookTarget.position - _rig.HeadPivot.position;

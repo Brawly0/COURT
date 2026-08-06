@@ -11,6 +11,30 @@ namespace CaseClosed.Game
     /// </summary>
     public class NetPlayer : NetworkBehaviour
     {
+        // vertical look angle, replicated so remote puppets tilt their heads
+        // the way their owner is actually looking
+        private readonly NetworkVariable<float> _lookPitch = new NetworkVariable<float>(
+            0f, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Owner);
+
+        private FirstPersonController _fpc;
+        private CharacterAnimator _anim;
+
+        private void Update()
+        {
+            if (!IsSpawned) return;
+            if (IsOwner)
+            {
+                if (_fpc == null) _fpc = GetComponent<FirstPersonController>();
+                if (_fpc != null && Mathf.Abs(_lookPitch.Value - _fpc.Pitch) > 0.5f)
+                    _lookPitch.Value = _fpc.Pitch;
+            }
+            else
+            {
+                if (_anim == null) _anim = GetComponentInChildren<CharacterAnimator>();
+                if (_anim != null) _anim.LookPitch = _lookPitch.Value;
+            }
+        }
+
         public override void OnNetworkSpawn()
         {
             var cnt = GetComponent<ClientNetworkTransform>();

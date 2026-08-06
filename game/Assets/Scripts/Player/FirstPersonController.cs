@@ -33,6 +33,11 @@ namespace CaseClosed.Game
         public float RegenPerSec = 10f;
         public float ExhaustedThreshold = 15f;
 
+        [Header("Camera")]
+        // third person by default while the map is being built - F5 toggles
+        public bool ThirdPerson = true;
+        public float ThirdPersonDistance = 3.4f;
+
         [Header("Feel")]
         // gentler than v1 - camera motion stacks with the PSX look, and too
         // much of it reads as seasickness rather than weight
@@ -44,6 +49,8 @@ namespace CaseClosed.Game
         public bool IsCrouching { get; private set; }
         public bool IsSprinting { get; private set; }
         public float SpeedMetresPerSec { get; private set; }
+        /// <summary>Vertical look angle in degrees (+down), for head sync.</summary>
+        public float Pitch => _pitch;
         /// <summary>0-1 exhaustion, used by the HUD and (later) proximity voice wheeze.</summary>
         public float Exhaustion => 1f - Mathf.Clamp01(Stamina / 100f);
 
@@ -77,6 +84,12 @@ namespace CaseClosed.Game
             if (kb.escapeKey.wasPressedThisFrame)
                 Cursor.lockState = Cursor.lockState == CursorLockMode.Locked
                     ? CursorLockMode.None : CursorLockMode.Locked;
+
+            if (kb.f5Key.wasPressedThisFrame)
+            {
+                ThirdPerson = !ThirdPerson;
+                _headVisApplied = false;
+            }
 
             // ---------------- look ----------------
             if (mouse != null && Cursor.lockState == CursorLockMode.Locked)
@@ -167,15 +180,49 @@ namespace CaseClosed.Game
             {
                 _anim.SetSpeed(SpeedMetresPerSec);
                 _anim.Stress = Exhaustion * 0.6f;       // winded reads as rattled
+                _anim.LookPitch = _pitch;               // head tilts with the view
+            }
+            // (re)apply head visibility once the body exists or the view toggles
+            if (!_headVisApplied)
+            {
+                if (_body == null) _body = GetComponent<PlayerBodySpawner>();
+                if (_body != null && _body.HeadReady)
+                {
+                    _body.SetHeadVisible(ThirdPerson);
+                    _headVisApplied = true;
+                }
             }
         }
 
         private float _landDip, _coyote;
         private bool _exhausted;
+        private PlayerBodySpawner _body;
+        private bool _headVisApplied;
 
         private void UpdateCamera(bool moving)
         {
             float dt = Time.deltaTime;
+
+            if (ThirdPerson)
+            {
+                // over-the-shoulder orbit; spherecast pulls the camera in so it
+                // never clips through walls in tight corridors
+                Vector3 pivot = transform.TransformPoint(0f, 1.7f, 0f);
+                Quaternion camRot = transform.rotation * Quaternion.Euler(_pitch, 0f, 0f);
+                Vector3 desired = pivot + camRot * new Vector3(0.4f, 0.15f, -ThirdPersonDistance);
+                Vector3 dir = desired - pivot;
+                float want = dir.magnitude;
+                dir /= want;
+                if (Physics.SphereCast(pivot, 0.25f, dir, out var block, want))
+                    desired = pivot + dir * Mathf.Max(0.5f, block.distance - 0.1f);
+
+                _camT.position = Vector3.Lerp(_camT.position, desired, dt * 18f);
+                _camT.rotation = camRot;
+                if (_cam != null)
+                    _cam.fieldOfView = Mathf.Lerp(_cam.fieldOfView,
+                        _baseFov + (IsSprinting ? SprintFovKick : 0f), dt * 6f);
+                return;
+            }
 
             // head bob follows the stride, so footsteps and view sync up
             float strideRate = BobSpeed * Mathf.Clamp01(SpeedMetresPerSec / WalkSpeed);

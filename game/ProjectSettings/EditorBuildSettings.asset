@@ -8,6 +8,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Courthouse.unity
     guid: 68b18e4839b3fda4daf47dc40f6f11be
+  - enabled: 1
+    path: Assets/Scenes/CourthouseRVT.unity
+    guid: f35f001ff2228544ca0c44ccfee6be47
   m_configObjects:
     com.unity.adaptivePerformance.basic.provider_settings: {fileID: 11400000, guid: b56a3bd3b93877b469f66daf6657512f, type: 2}
     com.unity.adaptiveperformance.loader_settings: {fileID: 11400000, guid: 42302c85c723c0d439397040e4882bac, type: 2}

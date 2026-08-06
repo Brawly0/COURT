@@ -21,17 +21,32 @@ namespace CaseClosed.Game
             var rig = CharacterBuilder.Build(transform, seed, true);
             var anim = gameObject.AddComponent<CharacterAnimator>();
             anim.Init(rig, seed);
+            _headRenderers = rig.HeadPivot.GetComponentsInChildren<Renderer>();
 
             // OFFLINE mode: NetPlayer exists but is never network-spawned, and an
             // unspawned NetworkBehaviour reports IsOwner=false - which left the
             // head visible and parked the camera inside the back of the skull.
+            // FirstPersonController re-applies visibility whenever the view toggles.
             bool isLocal = net == null || !net.IsSpawned || net.IsOwner;
             if (isLocal)
             {
-                // hide own head/hair from first person, keep the body visible when looking down
-                foreach (var r in rig.HeadPivot.GetComponentsInChildren<Renderer>())
-                    r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+                var fpc = GetComponent<FirstPersonController>();
+                SetHeadVisible(fpc == null || fpc.ThirdPerson);
             }
+        }
+
+        private Renderer[] _headRenderers;
+        public bool HeadReady => _headRenderers != null;
+
+        /// <summary>Third person shows the local head; first person shadow-only.</summary>
+        public void SetHeadVisible(bool visible)
+        {
+            if (_headRenderers == null) return;
+            foreach (var r in _headRenderers)
+                if (r != null)
+                    r.shadowCastingMode = visible
+                        ? UnityEngine.Rendering.ShadowCastingMode.On
+                        : UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
         }
     }
 }
