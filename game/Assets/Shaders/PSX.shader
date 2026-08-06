@@ -51,8 +51,9 @@ Shader "CaseClosed/PSX"
                 float4 positionCS : SV_POSITION;
                 noperspective float2 uvAffine : TEXCOORD0;   // affine (warped)
                 float2 uvCorrect  : TEXCOORD1;               // perspective-correct
-                float3 vertexLit  : TEXCOORD2;
-                float  fogFactor  : TEXCOORD3;
+                float3 positionWS : TEXCOORD2;
+                float3 normalWS   : TEXCOORD3;
+                float  fogFactor  : TEXCOORD4;
             };
 
             TEXTURE2D(_BaseMap);
@@ -90,21 +91,13 @@ Shader "CaseClosed/PSX"
                 snapped.xy = floor((positionCS.xy / positionCS.w) * grid) / grid * positionCS.w;
                 OUT.positionCS = snapped;
 
-                // ---- 2. per-vertex lighting (the console had no per-pixel) ----
-                Light mainLight = GetMainLight();
-                float ndotl = saturate(dot(normalWS, mainLight.direction));
-                float3 lit = mainLight.color * ndotl;
-                lit += unity_AmbientSky.rgb * _AmbientBoost;
-
-                #ifdef _ADDITIONAL_LIGHTS
-                uint count = GetAdditionalLightsCount();
-                for (uint i = 0u; i < count; ++i)
-                {
-                    Light l = GetAdditionalLight(i, positionWS);
-                    lit += l.color * l.distanceAttenuation * saturate(dot(normalWS, l.direction));
-                }
-                #endif
-                OUT.vertexLit = lit;
+                // NOTE: lighting is evaluated per-PIXEL in frag, not per-vertex.
+                // True PS1 hardware lit per vertex, but PS1 geometry was heavily
+                // subdivided; our courthouse is big flat slabs (a 45m wall has 4
+                // corners), so per-vertex lighting left every interior black.
+                // The PSX signature lives in snapping/affine/dither, not here.
+                OUT.positionWS = positionWS;
+                OUT.normalWS = normalWS;
 
                 float2 uv = TRANSFORM_TEX(IN.uv, _BaseMap);
                 OUT.uvAffine  = uv;
@@ -118,7 +111,28 @@ Shader "CaseClosed/PSX"
                 // ---- 3. blend between warped and correct UVs ----
                 float2 uv = lerp(IN.uvCorrect, IN.uvAffine, _AffineAmount);
                 half4 tex = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
-                half3 col = tex.rgb * _BaseColor.rgb * IN.vertexLit;
+
+                float3 n = normalize(IN.normalWS);
+
+                // ambient: spherical harmonics + a floor so nothing is ever pure black
+                float3 lit = SampleSH(n) * _AmbientBoost;
+                lit += _BaseColor.rgb * 0.0 + 0.045;
+
+                // main light (may be absent - the courthouse has no sun)
+                Light mainLight = GetMainLight();
+                lit += mainLight.color * saturate(dot(n, mainLight.direction));
+
+                // the fluorescent tubes: per-pixel so big slabs actually catch light
+                #if defined(_ADDITIONAL_LIGHTS) || defined(_ADDITIONAL_LIGHTS_VERTEX)
+                uint count = GetAdditionalLightsCount();
+                for (uint i = 0u; i < count; ++i)
+                {
+                    Light l = GetAdditionalLight(i, IN.positionWS);
+                    lit += l.color * l.distanceAttenuation * saturate(dot(n, l.direction));
+                }
+                #endif
+
+                half3 col = tex.rgb * _BaseColor.rgb * lit;
 
                 // ---- dither + colour quantisation (5-bit era palette) ----
                 uint2 px = uint2(IN.positionCS.xy) % 4u;
