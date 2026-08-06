@@ -57,14 +57,16 @@ namespace CaseClosed.EditorTools
             return new Color(c.r + n, c.g + n, c.b + n);
         });
 
+        // Per-brick variance kept SMALL (0.05): at 0.14 some bricks rendered
+        // nearly black and walls read as camouflage blotches, not masonry.
         public static Texture2D Brick() => Bake("brick", 256, 256, (x, y) =>
         {
             int row = y / 32;
             int bx = (x + (row % 2) * 32) / 64;
-            bool mortar = (y % 32 < 3) || ((x + (row % 2) * 32) % 64 < 3);
-            if (mortar) return new Color(0.55f, 0.52f, 0.48f);
-            float v = 0.36f + Hash(bx, row) * 0.14f;
-            return new Color(v * 1.15f, v * 0.52f, v * 0.40f);
+            bool mortar = (y % 32 < 4) || ((x + (row % 2) * 32) % 64 < 4);
+            if (mortar) return new Color(0.58f, 0.55f, 0.50f);
+            float v = 0.44f + Hash(bx, row) * 0.05f;
+            return new Color(v * 1.18f, v * 0.62f, v * 0.50f);
         });
 
         public static Texture2D Carpet() => Bake("carpet", 128, 128, (x, y) =>
@@ -73,11 +75,12 @@ namespace CaseClosed.EditorTools
             return new Color(v, v, v);                                     // neutral - tinted per material
         });
 
-        // Wall noise stays LOW frequency and LOW amplitude: high-frequency
-        // speckle on big walls shimmers under dither and reads as visual static.
+        // Wall noise: FINE speckle at LOW amplitude. (Cells of 32/64 px on a
+        // 128px texture made four giant blocks per tile, and quantisation
+        // turned each block into a hard visible band - the camo-wall bug.)
         public static Texture2D Plaster() => Bake("plaster", 128, 128, (x, y) =>
         {
-            float v = 0.62f + (Noise(x, y, 32) - 0.5f) * 0.030f + (Noise(x, y, 64) - 0.5f) * 0.020f;
+            float v = 0.62f + (Noise(x, y, 8) - 0.5f) * 0.022f + (Noise(x, y, 16) - 0.5f) * 0.014f;
             return new Color(v, v * 0.95f, v * 0.83f);
         });
 

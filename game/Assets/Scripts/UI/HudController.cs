@@ -51,8 +51,15 @@ namespace CaseClosed.Game
             EnsureStyles();
             var rt = CaseRuntime.Instance;
             if (rt == null || rt.Case == null) return;
-            if (_player == null) _player = FindFirstObjectByType<FirstPersonController>();
-            if (_interactor == null) _interactor = FindFirstObjectByType<Interactor>();
+            // must be the LOCAL player's components: remote copies exist in the
+            // scene too, but NetPlayer disables their scripts, so filter on
+            // enabled instead of taking whichever Find returns first
+            if (_player == null || !_player.enabled)
+                _player = FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None)
+                    .FirstOrDefault(p => p.enabled);
+            if (_interactor == null || !_interactor.enabled)
+                _interactor = FindObjectsByType<Interactor>(FindObjectsSortMode.None)
+                    .FirstOrDefault(i => i.enabled);
 
             // ---- top-left: clock + evidence ----
             int m = Mathf.FloorToInt(rt.TimeRemaining / 60f);

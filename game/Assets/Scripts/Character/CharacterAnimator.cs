@@ -43,6 +43,7 @@ namespace CaseClosed.Game
             delta.y = 0f;
             _prevPos = transform.position;
             float measured = dt > 0f ? delta.magnitude / dt : 0f;
+            if (measured > 20f) measured = 0f;   // teleport (bell/spawn), not running
             if (measured > 0.05f) _speed01 = Mathf.Lerp(_speed01, Mathf.Clamp01(measured / 6f), dt * 8f);
             else _speed01 = Mathf.Lerp(_speed01, 0f, dt * 8f);
 
@@ -112,16 +113,16 @@ namespace CaseClosed.Game
                 _dart = new Vector2(Random.Range(-range, range), Random.Range(-range * 0.6f, range * 0.6f));
             }
             if (_rig.PupilL) _rig.PupilL.localPosition = Vector3.Lerp(_rig.PupilL.localPosition,
-                new Vector3(_dart.x, _dart.y, -0.6f), dt * 8f);
+                new Vector3(_dart.x, _dart.y, 0.6f), dt * 8f);
             if (_rig.PupilR) _rig.PupilR.localPosition = Vector3.Lerp(_rig.PupilR.localPosition,
-                new Vector3(_dart.x, _dart.y, -0.6f), dt * 8f);
+                new Vector3(_dart.x, _dart.y, 0.6f), dt * 8f);
 
             // ---- jaw: talking is driven externally by SetTalking() ----
             if (_rig.Jaw)
             {
                 float open = _talking > 0f ? Mathf.Abs(Mathf.Sin(t * 18f)) * 0.10f : 0f;
                 _talking = Mathf.Max(0f, _talking - dt);
-                _rig.Jaw.localPosition = new Vector3(0f, -0.30f - open, -0.30f);
+                _rig.Jaw.localPosition = new Vector3(0f, -0.30f - open, 0.30f);
             }
         }
 

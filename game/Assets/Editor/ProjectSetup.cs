@@ -65,11 +65,13 @@ namespace CaseClosed.EditorTools
             var vig = profile.Add<Vignette>(true);
             vig.intensity.Override(0.38f);
             vig.smoothness.Override(0.45f);
+            // grain/CA kept LOW: both are per-frame motion layered on every pixel,
+            // and at 0.45 grain the whole screen visibly crawled
             var grain = profile.Add<FilmGrain>(true);
             grain.type.Override(FilmGrainLookup.Medium1);
-            grain.intensity.Override(0.45f);
+            grain.intensity.Override(0.16f);
             var ca = profile.Add<ChromaticAberration>(true);
-            ca.intensity.Override(0.08f);
+            ca.intensity.Override(0.02f);
             var col = profile.Add<ColorAdjustments>(true);
             col.saturation.Override(-14f);
             col.contrast.Override(10f);

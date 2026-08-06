@@ -22,7 +22,10 @@ namespace CaseClosed.Game
             var anim = gameObject.AddComponent<CharacterAnimator>();
             anim.Init(rig, seed);
 
-            bool isLocal = net == null || net.IsOwner;
+            // OFFLINE mode: NetPlayer exists but is never network-spawned, and an
+            // unspawned NetworkBehaviour reports IsOwner=false - which left the
+            // head visible and parked the camera inside the back of the skull.
+            bool isLocal = net == null || !net.IsSpawned || net.IsOwner;
             if (isLocal)
             {
                 // hide own head/hair from first person, keep the body visible when looking down

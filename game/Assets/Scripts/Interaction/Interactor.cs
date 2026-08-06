@@ -29,6 +29,7 @@ namespace CaseClosed.Game
 
         private void Update()
         {
+            var prevTarget = _target;
             _target = null;
             CurrentPrompt = null;
 
@@ -41,6 +42,9 @@ namespace CaseClosed.Game
 
             var kb = Keyboard.current;
             bool holding = kb != null && kb.eKey.isPressed && _target != null;
+            // progress belongs to ONE target: sweeping the crosshair onto a
+            // neighbour must not inherit the previous target's hold time
+            if (!ReferenceEquals(_target, prevTarget)) _held = 0f;
             _held = holding ? _held + Time.deltaTime : 0f;
             HoldProgress = Mathf.Clamp01(_held / HoldSeconds);
 

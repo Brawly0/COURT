@@ -9,6 +9,12 @@ namespace CaseClosed.Game
     /// the tell channel), cheap suit, blocky limbs, 300-800 tri budget.
     /// One base rig; head/hair/tie/accessory swaps give the cast its variety,
     /// seeded per character so every client sees the same Greg.
+    ///
+    /// ORIENTATION: the face is on +Z (transform.forward). Camera looks down
+    /// +Z, LookRotation points +Z at targets, movement is +Z - everything in
+    /// Unity assumes forward is the face. (v1 built the face on -Z, which put
+    /// the first-person camera behind the eyes and made NPCs watch players
+    /// with the backs of their heads.)
     /// </summary>
     public static class CharacterBuilder
     {
@@ -69,10 +75,10 @@ namespace CaseClosed.Game
                 new Vector3(0f, 1.12f, 0f), new Vector3(0.46f * bulk, 0.62f, 0.26f * bulk), suit);
             rig.TorsoT = torso;
             Cube(torso, "Hips", new Vector3(0f, -0.55f, 0f), new Vector3(0.92f, 0.30f, 1.0f), suit * 0.85f, true);
-            // shirt V + tie
-            Cube(torso, "Shirt", new Vector3(0f, 0.28f, -0.52f), new Vector3(0.42f, 0.42f, 0.06f),
+            // shirt V + tie on the chest (+Z = the front)
+            Cube(torso, "Shirt", new Vector3(0f, 0.28f, 0.52f), new Vector3(0.42f, 0.42f, 0.06f),
                 new Color(0.86f, 0.85f, 0.80f), true);
-            Cube(torso, "Tie", new Vector3(0f, 0.05f, -0.56f), new Vector3(0.14f, 0.70f, 0.05f), tie, true);
+            Cube(torso, "Tie", new Vector3(0f, 0.05f, 0.56f), new Vector3(0.14f, 0.70f, 0.05f), tie, true);
 
             // ---- head: oversized, the art bible's whole point ----
             rig.HeadPivot = new GameObject("HeadPivot").transform;
@@ -84,39 +90,39 @@ namespace CaseClosed.Game
             rig.Head = head;
             Cube(head, "Neck", new Vector3(0f, -0.62f, 0f), new Vector3(0.45f, 0.28f, 0.5f), skin * 0.9f, true);
 
-            // eyes: huge whites, tiny pupils
-            rig.EyeL = Cube(head, "EyeL", new Vector3(-0.24f, 0.10f, -0.51f),
+            // eyes: huge whites, tiny pupils, on the FRONT of the face (+Z)
+            rig.EyeL = Cube(head, "EyeL", new Vector3(-0.24f, 0.10f, 0.51f),
                 new Vector3(0.30f, 0.34f, 0.06f), new Color(0.97f, 0.96f, 0.93f), true);
-            rig.EyeR = Cube(head, "EyeR", new Vector3(0.24f, 0.10f, -0.51f),
+            rig.EyeR = Cube(head, "EyeR", new Vector3(0.24f, 0.10f, 0.51f),
                 new Vector3(0.30f, 0.34f, 0.06f), new Color(0.97f, 0.96f, 0.93f), true);
-            rig.PupilL = Cube(rig.EyeL, "PupilL", new Vector3(0f, 0f, -0.6f),
+            rig.PupilL = Cube(rig.EyeL, "PupilL", new Vector3(0f, 0f, 0.6f),
                 new Vector3(0.34f, 0.34f, 0.5f), new Color(0.04f, 0.04f, 0.05f), true);
-            rig.PupilR = Cube(rig.EyeR, "PupilR", new Vector3(0f, 0f, -0.6f),
+            rig.PupilR = Cube(rig.EyeR, "PupilR", new Vector3(0f, 0f, 0.6f),
                 new Vector3(0.34f, 0.34f, 0.5f), new Color(0.04f, 0.04f, 0.05f), true);
             // brows sell stress far better than a stat readout
-            Cube(head, "BrowL", new Vector3(-0.24f, 0.30f, -0.52f), new Vector3(0.32f, 0.07f, 0.06f), hair, true);
-            Cube(head, "BrowR", new Vector3(0.24f, 0.30f, -0.52f), new Vector3(0.32f, 0.07f, 0.06f), hair, true);
+            Cube(head, "BrowL", new Vector3(-0.24f, 0.30f, 0.52f), new Vector3(0.32f, 0.07f, 0.06f), hair, true);
+            Cube(head, "BrowR", new Vector3(0.24f, 0.30f, 0.52f), new Vector3(0.32f, 0.07f, 0.06f), hair, true);
 
-            rig.Jaw = Cube(head, "Jaw", new Vector3(0f, -0.30f, -0.30f),
+            rig.Jaw = Cube(head, "Jaw", new Vector3(0f, -0.30f, 0.30f),
                 new Vector3(0.72f, 0.22f, 0.45f), skin * 0.95f, true);
             if (stache)
-                Cube(head, "Moustache", new Vector3(0f, -0.14f, -0.53f), new Vector3(0.40f, 0.09f, 0.06f), hair, true);
+                Cube(head, "Moustache", new Vector3(0f, -0.14f, 0.53f), new Vector3(0.40f, 0.09f, 0.06f), hair, true);
             if (!balding)
             {
-                Cube(head, "Hair", new Vector3(0f, 0.42f, 0.02f), new Vector3(1.06f, 0.28f, 1.06f), hair, true);
-                Cube(head, "HairBack", new Vector3(0f, 0.10f, 0.52f), new Vector3(1.02f, 0.75f, 0.10f), hair, true);
+                Cube(head, "Hair", new Vector3(0f, 0.42f, -0.02f), new Vector3(1.06f, 0.28f, 1.06f), hair, true);
+                Cube(head, "HairBack", new Vector3(0f, 0.10f, -0.52f), new Vector3(1.02f, 0.75f, 0.10f), hair, true);
             }
             else
             {
-                Cube(head, "HairRing", new Vector3(0f, 0.16f, 0.30f), new Vector3(1.04f, 0.30f, 0.55f), hair, true);
+                Cube(head, "HairRing", new Vector3(0f, 0.16f, -0.30f), new Vector3(1.04f, 0.30f, 0.55f), hair, true);
             }
             if (glasses)
             {
-                Cube(head, "GlassL", new Vector3(-0.24f, 0.10f, -0.56f), new Vector3(0.40f, 0.42f, 0.03f),
+                Cube(head, "GlassL", new Vector3(-0.24f, 0.10f, 0.56f), new Vector3(0.40f, 0.42f, 0.03f),
                     new Color(0.05f, 0.05f, 0.06f), true);
-                Cube(head, "GlassR", new Vector3(0.24f, 0.10f, -0.56f), new Vector3(0.40f, 0.42f, 0.03f),
+                Cube(head, "GlassR", new Vector3(0.24f, 0.10f, 0.56f), new Vector3(0.40f, 0.42f, 0.03f),
                     new Color(0.05f, 0.05f, 0.06f), true);
-                Cube(head, "GlassBridge", new Vector3(0f, 0.10f, -0.55f), new Vector3(0.16f, 0.05f, 0.03f),
+                Cube(head, "GlassBridge", new Vector3(0f, 0.10f, 0.55f), new Vector3(0.16f, 0.05f, 0.03f),
                     new Color(0.05f, 0.05f, 0.06f), true);
             }
 
@@ -142,8 +148,8 @@ namespace CaseClosed.Game
                 Cube(go.transform, name + "_Hand", new Vector3(0f, -len - 0.07f, 0f),
                     new Vector3(0.15f, 0.15f, 0.16f), handSkin.Value);
             else
-                Cube(go.transform, name + "_Shoe", new Vector3(0f, -len - 0.05f, -0.05f),
-                    new Vector3(0.17f, 0.10f, 0.26f), new Color(0.07f, 0.06f, 0.06f));
+                Cube(go.transform, name + "_Shoe", new Vector3(0f, -len - 0.05f, 0.05f),
+                    new Vector3(0.17f, 0.10f, 0.26f), new Color(0.07f, 0.06f, 0.06f));  // toe forward
             return go.transform;
         }
 
@@ -165,7 +171,11 @@ namespace CaseClosed.Game
         private static T Pick<T>(T[] arr, System.Random rng) => arr[rng.Next(arr.Length)];
     }
 
-    /// <summary>Shared flat-color materials, so 8 players + 6 NPCs don't spawn 200 materials.</summary>
+    /// <summary>
+    /// Shared flat-color materials, so 8 players + 6 NPCs don't spawn 200
+    /// materials. Characters use the PSX shader with a MODERATE snap - their
+    /// triangles are small, so the jitter reads as charm, not seasickness.
+    /// </summary>
     public static class MaterialCache
     {
         private static readonly Dictionary<int, Material> _cache = new Dictionary<int, Material>();
@@ -176,9 +186,20 @@ namespace CaseClosed.Game
             int key = (Mathf.RoundToInt(c.r * 255) << 16) | (Mathf.RoundToInt(c.g * 255) << 8) | Mathf.RoundToInt(c.b * 255);
             if (_cache.TryGetValue(key, out var m) && m != null) return m;
             if (_shader == null)
-                _shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            m = new Material(_shader) { color = c };
-            m.SetFloat("_Smoothness", 0.05f);
+                _shader = Shader.Find("CaseClosed/PSX")
+                       ?? Shader.Find("Universal Render Pipeline/Lit")
+                       ?? Shader.Find("Standard");
+            m = new Material(_shader);
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c);
+            else m.color = c;
+            if (m.HasProperty("_SnapAmount"))
+            {
+                m.SetFloat("_SnapAmount", 220f);     // small tris: jitter is safe here
+                m.SetFloat("_AffineAmount", 0.25f);
+                m.SetFloat("_ColorDepth", 32f);
+                m.SetFloat("_DitherAmount", 1.0f);
+            }
+            if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.05f);
             _cache[key] = m;
             return m;
         }

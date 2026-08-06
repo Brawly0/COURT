@@ -23,6 +23,10 @@ namespace CaseClosed.Game
         public float MouseSensitivity = 0.12f;
         public float Gravity = -20f;
 
+        [Header("Jump")]
+        public float JumpSpeed = 5.2f;
+        public float JumpStaminaCost = 8f;
+
         [Header("Stamina")]
         public float Stamina = 100f;
         public float SprintDrainPerSec = 15f;
@@ -30,10 +34,12 @@ namespace CaseClosed.Game
         public float ExhaustedThreshold = 15f;
 
         [Header("Feel")]
-        public float BobAmount = 0.045f;
+        // gentler than v1 - camera motion stacks with the PSX look, and too
+        // much of it reads as seasickness rather than weight
+        public float BobAmount = 0.030f;
         public float BobSpeed = 9.5f;
-        public float LeanAmount = 1.8f;
-        public float SprintFovKick = 6f;
+        public float LeanAmount = 1.1f;
+        public float SprintFovKick = 5f;
 
         public bool IsCrouching { get; private set; }
         public bool IsSprinting { get; private set; }
@@ -106,7 +112,12 @@ namespace CaseClosed.Game
 
             // ---------------- stamina & sprint ----------------
             bool wantsSprint = kb.leftShiftKey.isPressed && moving && !IsCrouching;
-            IsSprinting = wantsSprint && Stamina > 1f;
+            // hysteresis latch: without it IsSprinting flickers at ~24Hz around
+            // the empty mark (drain > regen per frame), pinning stamina at ~1,
+            // jittering FOV/bob, and never allowing actual recovery
+            if (Stamina <= 1f) _exhausted = true;
+            else if (Stamina >= ExhaustedThreshold) _exhausted = false;
+            IsSprinting = wantsSprint && !_exhausted;
             Stamina = Mathf.Clamp(
                 Stamina + (IsSprinting ? -SprintDrainPerSec : RegenPerSec) * Time.deltaTime, 0f, 100f);
 
@@ -120,19 +131,38 @@ namespace CaseClosed.Game
             _velocity.x = flat.x; _velocity.z = flat.z;
             SpeedMetresPerSec = flat.magnitude;
 
-            // ---------------- gravity & landing ----------------
+            // ---------------- gravity, jump & landing ----------------
             if (_cc.isGrounded)
             {
                 if (!_wasGrounded) _landDip = 0.09f;    // little knee bend on touchdown
                 _fallSpeed = -2f;
+                _coyote = 0.12f;                        // grace window after stepping off
             }
-            else _fallSpeed += Gravity * Time.deltaTime;
+            else
+            {
+                _fallSpeed += Gravity * Time.deltaTime;
+                _coyote -= Time.deltaTime;
+            }
+
+            if (kb.spaceKey.wasPressedThisFrame && _coyote > 0f && !IsCrouching
+                && Stamina >= JumpStaminaCost)
+            {
+                _fallSpeed = JumpSpeed;
+                _coyote = 0f;
+                Stamina -= JumpStaminaCost;             // hopping everywhere has a price
+                _landDip = 0f;
+            }
             _wasGrounded = _cc.isGrounded;
             _velocity.y = _fallSpeed;
 
-            _cc.Move(_velocity * Time.deltaTime);
+            var flags = _cc.Move(_velocity * Time.deltaTime);
+            // head hit a ceiling: kill upward velocity or we hover there
+            if ((flags & CollisionFlags.Above) != 0 && _fallSpeed > 0f) _fallSpeed = 0f;
 
             UpdateCamera(moving);
+            // lazy fetch: PlayerBodySpawner adds the animator in Start, AFTER
+            // our Awake ran - caching in Awake left this null forever
+            if (_anim == null) _anim = GetComponentInChildren<CharacterAnimator>();
             if (_anim != null)
             {
                 _anim.SetSpeed(SpeedMetresPerSec);
@@ -140,7 +170,8 @@ namespace CaseClosed.Game
             }
         }
 
-        private float _landDip;
+        private float _landDip, _coyote;
+        private bool _exhausted;
 
         private void UpdateCamera(bool moving)
         {
@@ -148,7 +179,10 @@ namespace CaseClosed.Game
 
             // head bob follows the stride, so footsteps and view sync up
             float strideRate = BobSpeed * Mathf.Clamp01(SpeedMetresPerSec / WalkSpeed);
-            if (moving && _cc.isGrounded) _bobPhase += dt * strideRate;
+            // wrap the phase: unbounded, the settle-lerp below jumps it by tens
+            // of radians per frame and Sin() lands randomly - a sustained camera
+            // shake on every running jump
+            if (moving && _cc.isGrounded) _bobPhase = Mathf.Repeat(_bobPhase + dt * strideRate, 2f * Mathf.PI);
             else _bobPhase = Mathf.Lerp(_bobPhase, 0f, dt * 6f);
 
             float amp = BobAmount * (IsSprinting ? 1.5f : 1f) * Mathf.Clamp01(SpeedMetresPerSec / WalkSpeed);
@@ -159,7 +193,7 @@ namespace CaseClosed.Game
             float camY = (IsCrouching ? CrouchHeight - 0.2f : _camBaseY) + bobY - _landDip;
 
             _camT.localPosition = Vector3.Lerp(_camT.localPosition, new Vector3(bobX, camY, 0f), dt * 12f);
-            _camT.localRotation = Quaternion.Euler(_pitch, 0f, _lean + Mathf.Sin(_bobPhase * 0.5f) * amp * 12f);
+            _camT.localRotation = Quaternion.Euler(_pitch, 0f, _lean + Mathf.Sin(_bobPhase * 0.5f) * amp * 8f);
 
             if (_cam != null)
             {

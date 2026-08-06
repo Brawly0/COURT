@@ -13,6 +13,7 @@ namespace CaseClosed.Game
         public Vector3 HomePosition;
         public float WanderRadius = 1.6f;
         public float NoticeRange = 7f;
+        public int LookSeed;
 
         private CharacterAnimator _anim;
         private Vector3 _target;
@@ -21,7 +22,18 @@ namespace CaseClosed.Game
 
         private void Start()
         {
+            // Build the rig HERE, at runtime. An editor-baked rig doesn't
+            // survive entering play mode: CharacterAnimator's rig reference
+            // isn't serializable, so baked NPCs woke as frozen mannequins.
+            // Only the seed is serialized - same seed, same Greg, every run.
+            var stale = transform.Find("CharacterBody");
+            if (stale != null) Destroy(stale.gameObject);
+
             _anim = GetComponent<CharacterAnimator>();
+            if (_anim == null) _anim = gameObject.AddComponent<CharacterAnimator>();
+            var rig = CharacterBuilder.Build(transform, LookSeed, false);
+            _anim.Init(rig, LookSeed);
+
             if (HomePosition == Vector3.zero) HomePosition = transform.position;
             _target = HomePosition;
         }
@@ -57,7 +69,14 @@ namespace CaseClosed.Game
                 foreach (var p in FindObjectsByType<FirstPersonController>(FindObjectsSortMode.None))
                 {
                     float d = (p.transform.position - transform.position).sqrMagnitude;
-                    if (d < best) { best = d; _watching = p.transform; }
+                    if (d < best)
+                    {
+                        best = d;
+                        // aim at the EYES, not the root - the root pivot is at
+                        // floor level and made every NPC stare at players' shoes
+                        var cam = p.GetComponentInChildren<Camera>(true);
+                        _watching = cam != null ? cam.transform : p.transform;
+                    }
                 }
             }
             if (_anim != null) _anim.LookTarget = _watching;

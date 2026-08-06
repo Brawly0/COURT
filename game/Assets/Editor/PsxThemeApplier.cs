@@ -49,28 +49,36 @@ namespace CaseClosed.EditorTools
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
                 var m = AssetDatabase.LoadAssetAtPath<Material>(path);
-                if (m == null || m.shader == psx) continue;
+                if (m == null) continue;
+                bool wasPsx = m.shader == psx;   // re-runs must still update tuning values
 
-                Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor")
-                        : m.HasProperty("_Color") ? m.color : Color.white;
-                Texture tex = m.HasProperty("_BaseMap") ? m.GetTexture("_BaseMap") : m.mainTexture;
-                Vector2 scale = m.mainTextureScale, offset = m.mainTextureOffset;
-                bool emissive = m.IsKeywordEnabled("_EMISSION");
-                Color emis = emissive && m.HasProperty("_EmissionColor") ? m.GetColor("_EmissionColor") : Color.black;
+                if (!wasPsx)
+                {
+                    Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor")
+                            : m.HasProperty("_Color") ? m.color : Color.white;
+                    Texture tex = m.HasProperty("_BaseMap") ? m.GetTexture("_BaseMap") : m.mainTexture;
+                    Vector2 scale = m.mainTextureScale, offset = m.mainTextureOffset;
+                    bool emissive = m.IsKeywordEnabled("_EMISSION");
+                    Color emis = emissive && m.HasProperty("_EmissionColor") ? m.GetColor("_EmissionColor") : Color.black;
 
-                m.shader = psx;
-                m.SetColor("_BaseColor", c);
-                if (tex != null) m.SetTexture("_BaseMap", tex);
-                m.SetTextureScale("_BaseMap", scale);
-                m.SetTextureOffset("_BaseMap", offset);
-                // emissive surfaces (tubes, screens) keep glowing via ambient boost
-                m.SetFloat("_AmbientBoost", emissive ? 2f + emis.maxColorComponent : 0.85f);
-                // Big architectural surfaces: warp/snap kept subtle (see shader
-                // header). Aggressive values swim horribly on 45m quads.
-                m.SetFloat("_SnapAmount", 220f);
-                m.SetFloat("_AffineAmount", 0.10f);
-                m.SetFloat("_ColorDepth", 48f);
-                m.SetFloat("_DitherAmount", 0.18f);
+                    m.shader = psx;
+                    m.SetColor("_BaseColor", c);
+                    if (tex != null) m.SetTexture("_BaseMap", tex);
+                    m.SetTextureScale("_BaseMap", scale);
+                    m.SetTextureOffset("_BaseMap", offset);
+                    // emissive surfaces (tubes, screens) keep glowing via ambient boost
+                    m.SetFloat("_AmbientBoost", emissive ? 2f + emis.maxColorComponent : 0.85f);
+                }
+
+                // ARCHITECTURE: snapping OFF (>=600) and affine OFF. Both effects
+                // are only safe on small triangles; on 45m quads the snap math
+                // (clip-space divide by w near zero for off-screen corners) made
+                // entire walls writhe as the camera moved. The PSX look on the
+                // environment comes from texel crunch + dither + low-res render.
+                m.SetFloat("_SnapAmount", 640f);
+                m.SetFloat("_AffineAmount", 0f);
+                m.SetFloat("_ColorDepth", 40f);
+                m.SetFloat("_DitherAmount", 1.0f);   // exactly one step: masks banding
                 EditorUtility.SetDirty(m);
                 n++;
             }
@@ -122,13 +130,15 @@ namespace CaseClosed.EditorTools
                     Mathf.Cos(placed * 2.4f) * 1.4f, 0f, Mathf.Sin(placed * 2.4f) * 1.4f);
                 go.transform.rotation = Quaternion.Euler(0f, placed * 47f, 0f);
 
-                var rig = CharacterBuilder.Build(go.transform, 1000 + placed * 17, false);
+                // NO editor-time rig build: the animator's rig reference doesn't
+                // survive scene serialization (frozen-mannequin bug). NpcIdle
+                // builds it in Start from the serialized seed.
                 var anim = go.AddComponent<CharacterAnimator>();
-                anim.Init(rig, 1000 + placed * 17);
                 anim.Stress = Mathf.Repeat(placed * 0.23f, 0.7f);
 
                 var idler = go.AddComponent<NpcIdle>();
                 idler.HomePosition = go.transform.position;
+                idler.LookSeed = 1000 + placed * 17;
                 placed++;
             }
             return placed;

@@ -83,6 +83,8 @@ MonoBehaviour:
   Acceleration: 14
   MouseSensitivity: 0.12
   Gravity: -20
+  JumpSpeed: 5.2
+  JumpStaminaCost: 8
   Stamina: 100
   SprintDrainPerSec: 15
   RegenPerSec: 10
@@ -117,7 +119,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 1645606853
+  GlobalObjectIdHash: 0
   InScenePlacedSourceGlobalObjectIdHash: 0
   DeferredDespawnTick: 0
   Ownership: 1
@@ -351,6 +353,8 @@ MonoBehaviour:
   SampleRate: 12000
   OpenMic: 0
   MicGain: 1.6
+  GateThreshold: 0.015
+  GateHold: 0.35
   Muted: 0
 --- !u!1 &5000818197152098520
 GameObject:
