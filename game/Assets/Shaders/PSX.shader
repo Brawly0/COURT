@@ -11,10 +11,15 @@ Shader "CaseClosed/PSX"
     {
         _BaseMap ("Base Map", 2D) = "white" {}
         _BaseColor ("Base Color", Color) = (1,1,1,1)
-        _SnapAmount ("Vertex Snap (higher = coarser)", Range(8, 320)) = 64
-        _AffineAmount ("Affine Warp", Range(0, 1)) = 0.85
-        _ColorDepth ("Color Depth (levels)", Range(4, 64)) = 32
-        _DitherAmount ("Dither", Range(0, 1)) = 0.55
+        // Defaults tuned for LARGE architectural surfaces. Affine warp and
+        // coarse snapping are only tolerable on small triangles (PS1 geometry
+        // was heavily subdivided); on a 45m floor quad they read as nauseating
+        // swimming, so both are dialled right back. The look survives - it
+        // lives in the dither, colour quantisation and texel crunch.
+        _SnapAmount ("Vertex Snap (higher = finer)", Range(8, 640)) = 220
+        _AffineAmount ("Affine Warp", Range(0, 1)) = 0.10
+        _ColorDepth ("Color Depth (levels)", Range(4, 64)) = 48
+        _DitherAmount ("Dither", Range(0, 1)) = 0.18
         _AmbientBoost ("Ambient Boost", Range(0, 2)) = 0.85
     }
 

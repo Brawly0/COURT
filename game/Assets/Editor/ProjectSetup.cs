@@ -55,7 +55,7 @@ namespace CaseClosed.EditorTools
         }
 
         /// <summary>Mockup-canon post: vignette + film grain + slight desaturation.</summary>
-        internal static void BuildPostFx()
+        public static void BuildPostFx()
         {
             const string path = "Assets/Settings/CourthouseVolume.asset";
             AssetDatabase.DeleteAsset(path);
@@ -82,7 +82,7 @@ namespace CaseClosed.EditorTools
             vol.sharedProfile = profile;
         }
 
-        internal static GameObject BuildPlayerPrefab()
+        public static GameObject BuildPlayerPrefab()
         {
             var player = new GameObject("Player");
 
@@ -91,14 +91,8 @@ namespace CaseClosed.EditorTools
             cc.radius = 0.35f;
             cc.center = new Vector3(0f, 0.9f, 0f);
 
-            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            UnityEngine.Object.DestroyImmediate(visual.GetComponent<Collider>());
-            visual.name = "Visual";
-            visual.transform.SetParent(player.transform, false);
-            visual.transform.localPosition = new Vector3(0f, 0.9f, 0f);
-            visual.transform.localScale = new Vector3(0.7f, 0.9f, 0.7f);
-            var suit = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/Suit.mat");
-            if (suit != null) visual.GetComponent<Renderer>().sharedMaterial = suit;
+            // No capsule placeholder: PlayerBodySpawner builds the PSX puppet at
+            // runtime, so remote players see the same character model as the NPCs.
 
             var camGo = new GameObject("Camera");
             camGo.transform.SetParent(player.transform, false);
@@ -114,8 +108,26 @@ namespace CaseClosed.EditorTools
             player.AddComponent<FirstPersonController>();
             player.AddComponent<Interactor>();
             player.AddComponent<NetworkObject>();
-            player.AddComponent<ClientNetworkTransform>();
+
+            // owner-authoritative transform, INTERPOLATED so remote players glide
+            // instead of teleporting between network ticks
+            var cnt = player.AddComponent<ClientNetworkTransform>();
+            cnt.Interpolate = true;
+            cnt.PositionThreshold = 0.02f;
+            cnt.RotAngleThreshold = 1.0f;
+            cnt.SyncScaleX = cnt.SyncScaleY = cnt.SyncScaleZ = false;
+
             player.AddComponent<NetPlayer>();
+            player.AddComponent<PlayerBodySpawner>();   // the PSX puppet everyone sees
+
+            // proximity voice: 3D AudioSource on the head, mic capture for the owner
+            var voiceGo = new GameObject("Voice");
+            voiceGo.transform.SetParent(player.transform, false);
+            voiceGo.transform.localPosition = new Vector3(0f, 1.55f, 0f);
+            var audio = voiceGo.AddComponent<AudioSource>();
+            audio.playOnAwake = false;
+            audio.spatialBlend = 1f;
+            voiceGo.AddComponent<ProximityVoice>();
 
             if (!AssetDatabase.IsValidFolder("Assets/Prefabs"))
                 AssetDatabase.CreateFolder("Assets", "Prefabs");
@@ -124,7 +136,7 @@ namespace CaseClosed.EditorTools
             return prefab;
         }
 
-        internal static void BuildNetwork(GameObject playerPrefab)
+        public static void BuildNetwork(GameObject playerPrefab)
         {
             var nmGo = new GameObject("NetworkManager");
             var nm = nmGo.AddComponent<NetworkManager>();
@@ -137,7 +149,7 @@ namespace CaseClosed.EditorTools
             syncGo.AddComponent<CaseNetSync>();
         }
 
-        internal static void BuildGameSystems(GameObject playerPrefab)
+        public static void BuildGameSystems(GameObject playerPrefab)
         {
             if (GameObject.Find("SpawnPoint") == null)
             {

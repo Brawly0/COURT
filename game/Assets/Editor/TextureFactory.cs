@@ -33,12 +33,11 @@ namespace CaseClosed.EditorTools
         public static Texture2D WoodPlanks() => Bake("wood", 256, 256, (x, y) =>
         {
             int plank = y / 64;
-            float baseV = 0.30f + Hash(plank, 7) * 0.10f;
-            float grain = Mathf.Sin((x + Hash(plank, 3) * 200f) * 0.22f) * 0.035f;
-            float seam = (y % 64 < 2) ? -0.12f : 0f;
-            float joint = ((x + plank * 90) % 256 < 2) ? -0.08f : 0f;
-            float v = baseV + grain + seam + joint + (Noise(x, y, 8) - 0.5f) * 0.03f;
-            return new Color(v * 1.25f, v * 0.82f, v * 0.52f);
+            float baseV = 0.34f + Hash(plank, 7) * 0.07f;
+            float grain = Mathf.Sin((x + Hash(plank, 3) * 200f) * 0.06f) * 0.020f;  // long, calm grain
+            float seam = (y % 64 < 2) ? -0.10f : 0f;
+            float v = baseV + grain + seam + (Noise(x, y, 24) - 0.5f) * 0.018f;
+            return new Color(v * 1.22f, v * 0.86f, v * 0.60f);
         });
 
         public static Texture2D CheckerFloor() => Bake("checker", 256, 256, (x, y) =>
@@ -74,11 +73,12 @@ namespace CaseClosed.EditorTools
             return new Color(v, v, v);                                     // neutral - tinted per material
         });
 
+        // Wall noise stays LOW frequency and LOW amplitude: high-frequency
+        // speckle on big walls shimmers under dither and reads as visual static.
         public static Texture2D Plaster() => Bake("plaster", 128, 128, (x, y) =>
         {
-            float v = 0.60f + (Noise(x, y, 6) - 0.5f) * 0.05f + (Noise(x, y, 24) - 0.5f) * 0.04f;
-            float streak = (Hash(x / 3, 0) - 0.5f) * 0.02f;
-            return new Color(v + streak, (v + streak) * 0.94f, (v + streak) * 0.80f);
+            float v = 0.62f + (Noise(x, y, 32) - 0.5f) * 0.030f + (Noise(x, y, 64) - 0.5f) * 0.020f;
+            return new Color(v, v * 0.95f, v * 0.83f);
         });
 
         public static Texture2D CeilingTiles() => Bake("ceiling", 256, 256, (x, y) =>
@@ -94,8 +94,7 @@ namespace CaseClosed.EditorTools
 
         public static Texture2D Concrete() => Bake("concrete", 256, 256, (x, y) =>
         {
-            float v = 0.36f + (Noise(x, y, 24) - 0.5f) * 0.10f + (Noise(x, y, 5) - 0.5f) * 0.06f;
-            if (Hash(x, y) > 0.995f) v -= 0.10f;                           // pitting
+            float v = 0.40f + (Noise(x, y, 48) - 0.5f) * 0.055f + (Noise(x, y, 20) - 0.5f) * 0.030f;
             return new Color(v, v, v * 1.02f);
         });
 

@@ -26,6 +26,12 @@ namespace CaseClosed.EditorTools
                 return;
             }
 
+            // rebake the procedural textures first - wall/floor noise was too
+            // high-frequency and shimmered under the dither
+            TextureFactory.Plaster(); TextureFactory.Concrete(); TextureFactory.WoodPlanks();
+            TextureFactory.CheckerFloor(); TextureFactory.TileFloor();
+            TextureFactory.Brick(); TextureFactory.Carpet(); TextureFactory.CeilingTiles();
+
             int converted = ConvertMaterials(psx);
             int cast = SpawnCast();
             AttachBodyToPlayerPrefab();
@@ -59,10 +65,12 @@ namespace CaseClosed.EditorTools
                 m.SetTextureOffset("_BaseMap", offset);
                 // emissive surfaces (tubes, screens) keep glowing via ambient boost
                 m.SetFloat("_AmbientBoost", emissive ? 2f + emis.maxColorComponent : 0.85f);
-                m.SetFloat("_SnapAmount", 64f);
-                m.SetFloat("_AffineAmount", 0.85f);
-                m.SetFloat("_ColorDepth", 32f);
-                m.SetFloat("_DitherAmount", 0.55f);
+                // Big architectural surfaces: warp/snap kept subtle (see shader
+                // header). Aggressive values swim horribly on 45m quads.
+                m.SetFloat("_SnapAmount", 220f);
+                m.SetFloat("_AffineAmount", 0.10f);
+                m.SetFloat("_ColorDepth", 48f);
+                m.SetFloat("_DitherAmount", 0.18f);
                 EditorUtility.SetDirty(m);
                 n++;
             }
