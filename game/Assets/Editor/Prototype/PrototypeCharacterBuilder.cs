@@ -39,6 +39,14 @@ namespace CaseClosed.EditorTools.Prototype
         private const float NeckY = 0.53f;       // local to hips
         private const float HeadHeight = 0.36f;
 
+        /// <summary>
+        /// Where a carried folder sits, local to the Torso joint. Chest height and
+        /// clear of the jacket front (which ends at z = 0.135), so the item reads as
+        /// held rather than embedded. The carry pose brings the hands to frame it.
+        /// Exposed on PlayerCarrySocket for tuning without a rebuild.
+        /// </summary>
+        private static readonly Vector3 CarrySocketLocal = new Vector3(0f, 0.32f, 0.46f);
+
         [MenuItem("Case Closed/Prototype/1. Build Character Prefab", priority = 100)]
         public static GameObject BuildFromMenu()
         {
@@ -70,7 +78,11 @@ namespace CaseClosed.EditorTools.Prototype
             BuildArms(torso, suit, skin);
             BuildHead(torso, skin, hair, eyeWhite, eyeDark);
 
-            AddComponents(root);
+            // Parented under Torso, not the root: the chest is animated, so anything
+            // held here follows the body without a line of follow code.
+            var carrySocket = PrototypeAssets.Joint("EvidenceCarrySocket", torso, CarrySocketLocal);
+
+            AddComponents(root, carrySocket);
 
             PrototypeAssets.EnsureFolder(PrototypeAssets.PrefabFolder);
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, PrototypeAssets.CharacterPrefabPath);
@@ -179,7 +191,7 @@ namespace CaseClosed.EditorTools.Prototype
         /// Wires the runtime components. Values here are the defaults you will
         /// actually play with — every one is exposed in the Inspector.
         /// </summary>
-        private static void AddComponents(GameObject root)
+        private static void AddComponents(GameObject root, Transform carrySocket)
         {
             var controller = root.AddComponent<CharacterController>();
             controller.height = 1.78f;
@@ -200,6 +212,18 @@ namespace CaseClosed.EditorTools.Prototype
 
             var driver = root.AddComponent<PlayerAnimatorDriver>();
             driver.Animator = animator;
+
+            // Where a held object is drawn, and what decides the carry pose. Both are
+            // pure presentation — custody stays on the server.
+            var socket = root.AddComponent<PlayerCarrySocket>();
+            socket.Socket = carrySocket;
+
+            var carryVisual = root.AddComponent<PlayerCarryVisual>();
+            carryVisual.Animator = animator;
+
+            // Hides your own head in first person. Only ever touched by your own
+            // camera rig, so remote copies keep the whole body.
+            root.AddComponent<PlayerLocalBody>();
 
             AddNetworkComponents(root, animator);
         }

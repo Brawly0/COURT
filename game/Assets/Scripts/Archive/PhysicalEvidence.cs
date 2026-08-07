@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
 using CaseClosed.Game.Interaction;
+using CaseClosed.Game.Prototype;
 
 namespace CaseClosed.Game.Archive
 {
@@ -26,11 +28,33 @@ namespace CaseClosed.Game.Archive
     public class PhysicalEvidence : NetworkInteractable
     {
         [Header("Carry")]
-        [Tooltip("Local offset from the carrier's origin where the item is drawn.")]
-        public Vector3 CarryOffset = new Vector3(0.35f, 1.15f, 0.45f);
+        [Tooltip("Fallback offset from the carrier's origin, used only if their rig has " +
+                 "no PlayerCarrySocket. A rig with a socket ignores this entirely.")]
+        public Vector3 CarryOffset = new Vector3(0f, 1.22f, 0.42f);
 
-        [Tooltip("How quickly the item settles into a carrier's hands.")]
-        public float FollowSharpness = 18f;
+        /// <summary>
+        /// Every spawned body on this machine. Lets any client answer "is player N
+        /// carrying something" without a lookup through the server-side director,
+        /// which does not exist on a client.
+        /// </summary>
+        private static readonly List<PhysicalEvidence> Active = new();
+
+        /// <summary>
+        /// The item this client believes the given player is holding, or null.
+        /// Derived purely from replicated custody — no extra network traffic, and it
+        /// cannot disagree with the folder it describes.
+        /// </summary>
+        public static PhysicalEvidence FindCarriedBy(ulong clientId)
+        {
+            for (int i = 0; i < Active.Count; i++)
+            {
+                var body = Active[i];
+                if (body == null || !body.InUse) continue;
+                if (body.Custody == EvidenceCustody.Carried && body.CarrierClientId == clientId)
+                    return body;
+            }
+            return null;
+        }
 
         private readonly NetworkVariable<FixedString64Bytes> _evidenceId = new(
             default, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -56,6 +80,34 @@ namespace CaseClosed.Game.Archive
         /// <summary>Unused pool entries have no id and stay invisible.</summary>
         public bool InUse => !string.IsNullOrEmpty(EvidenceId);
 
+        /// <summary>
+        /// One line per body in use, for the developer readout. Deliberately reports
+        /// the RESOLVED socket rather than just the carrier id: "carrier 1, socket
+        /// null" is the signature of a rig built before the socket existed, and is
+        /// otherwise indistinguishable from a custody bug.
+        /// </summary>
+        public static List<string> DebugSnapshot()
+        {
+            var lines = new List<string>();
+            for (int i = 0; i < Active.Count; i++)
+            {
+                var body = Active[i];
+                if (body == null || !body.InUse) continue;
+
+                string socket = body.Custody == EvidenceCustody.Carried
+                    ? (body.FindCarrierSocket()?.Attachment.name ?? "NULL")
+                    : "-";
+
+                string carrier = body.Custody == EvidenceCustody.Carried
+                    ? body.CarrierClientId.ToString()
+                    : "-";
+
+                lines.Add($"{body.EvidenceId}  custody={body.Custody}  carrier={carrier}\n" +
+                          $"    socket={socket}  pos={body.transform.position}");
+            }
+            return lines;
+        }
+
         /// <summary>Only a loose item on the floor can be picked up.</summary>
         public override bool IsAvailable => InUse && _custody.Value == EvidenceCustody.InWorld;
 
@@ -70,9 +122,17 @@ namespace CaseClosed.Game.Archive
         public override void OnNetworkSpawn()
         {
             base.OnNetworkSpawn();
+            if (!Active.Contains(this)) Active.Add(this);
+
             _custody.OnValueChanged += (_, __) => ApplyVisibility();
             _evidenceId.OnValueChanged += (_, __) => ApplyVisibility();
             ApplyVisibility();
+        }
+
+        public override void OnNetworkDespawn()
+        {
+            Active.Remove(this);
+            base.OnNetworkDespawn();
         }
 
         /// <summary>
@@ -125,21 +185,30 @@ namespace CaseClosed.Game.Archive
         /// Runs on every machine. A carried item is drawn at its carrier's socket;
         /// a loose one sits where the server says. No client ever decides custody —
         /// it only draws the consequence.
+        ///
+        /// LATEUPDATE, NOT UPDATE, and this matters more than it looks. The socket
+        /// hangs off an animated chest. Sampling it in Update reads the pose the
+        /// Animator wrote LAST frame, so the folder trails the body by one frame and
+        /// visibly swims during fast turns. LateUpdate runs after animation, so the
+        /// folder sits exactly where the hands are.
+        ///
+        /// Snapped, not smoothed, for the same reason: the socket is already attached
+        /// to the body, so any easing here is pure lag against a target that is not
+        /// moving relative to the hands.
         /// </summary>
-        private void Update()
+        private void LateUpdate()
         {
             if (!InUse) return;
 
             if (_custody.Value == EvidenceCustody.Carried)
             {
-                var carrier = FindCarrierTransform();
-                if (carrier == null) return;
+                var socket = FindCarrierSocket();
+                if (socket == null) return;
 
-                Vector3 target = carrier.TransformPoint(CarryOffset);
-                transform.position = Vector3.Lerp(transform.position, target,
-                    1f - Mathf.Exp(-FollowSharpness * Time.deltaTime));
-                transform.rotation = Quaternion.Slerp(transform.rotation, carrier.rotation,
-                    1f - Mathf.Exp(-FollowSharpness * Time.deltaTime));
+                bool localView = IsLocalCarrier();
+                socket.GetAttachPose(localView, out Vector3 position, out Quaternion rotation);
+
+                transform.SetPositionAndRotation(position, rotation);
             }
             else
             {
@@ -147,13 +216,45 @@ namespace CaseClosed.Game.Archive
             }
         }
 
-        private Transform FindCarrierTransform()
+        /// <summary>
+        /// True when this machine's own player is the carrier — the one case where a
+        /// first-person view offset would apply. Always false in third person today.
+        /// </summary>
+        private bool IsLocalCarrier()
+        {
+            var manager = NetworkManager.Singleton;
+            return manager != null && manager.IsClient && manager.LocalClientId == _carrier.Value;
+        }
+
+        /// <summary>
+        /// Resolves the carrier's carry socket. Falls back to a plain offset from the
+        /// player root, so a rig without a socket still holds the item somewhere
+        /// sensible rather than dropping it at the world origin.
+        /// </summary>
+        private PlayerCarrySocket FindCarrierSocket()
         {
             var manager = NetworkManager.Singleton;
             if (manager == null) return null;
             if (!manager.ConnectedClients.TryGetValue(_carrier.Value, out var client)) return null;
-            return client.PlayerObject != null ? client.PlayerObject.transform : null;
+
+            var player = client.PlayerObject;
+            if (player == null) return null;
+
+            var socket = player.GetComponentInChildren<PlayerCarrySocket>();
+            if (socket != null) return socket;
+
+            // No socket on this rig. Synthesise one so the item is still held.
+            if (_fallbackSocket == null)
+            {
+                _fallbackSocket = player.gameObject.AddComponent<PlayerCarrySocket>();
+                _fallbackSocket.PositionOffset = CarryOffset;
+                Debug.LogWarning("[Carry] Carrier has no PlayerCarrySocket — " +
+                                 "falling back to a root offset. Rebuild the character prefab.");
+            }
+            return _fallbackSocket;
         }
+
+        private PlayerCarrySocket _fallbackSocket;
 
         /// <summary>
         /// Unassigned pool entries, and items still filed away, are invisible and

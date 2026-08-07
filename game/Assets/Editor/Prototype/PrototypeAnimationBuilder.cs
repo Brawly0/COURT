@@ -34,6 +34,8 @@ namespace CaseClosed.EditorTools.Prototype
         private const string ArmR = "Visual/Hips/Torso/Arm_R";
         private const string ForearmL = "Visual/Hips/Torso/Arm_L/Forearm_L";
         private const string ForearmR = "Visual/Hips/Torso/Arm_R/Forearm_R";
+        private const string HandL = "Visual/Hips/Torso/Arm_L/Forearm_L/Hand_L";
+        private const string HandR = "Visual/Hips/Torso/Arm_R/Forearm_R/Hand_R";
 
         private const float HipRestY = 0.92f;
 
@@ -68,8 +70,9 @@ namespace CaseClosed.EditorTools.Prototype
             var jump = BuildJump();
             var fall = BuildFall();
             var land = BuildLand();
+            var carry = BuildCarryPose();
 
-            var controller = BuildController(idle, walk, run, sprint, jump, fall, land);
+            var controller = BuildController(idle, walk, run, sprint, jump, fall, land, carry);
             BindToCharacterPrefab(controller);
             return controller;
         }
@@ -241,7 +244,7 @@ namespace CaseClosed.EditorTools.Prototype
 
         private static AnimatorController BuildController(
             AnimationClip idle, AnimationClip walk, AnimationClip run, AnimationClip sprint,
-            AnimationClip jump, AnimationClip fall, AnimationClip land)
+            AnimationClip jump, AnimationClip fall, AnimationClip land, AnimationClip carry)
         {
             string path = PrototypeAssets.ControllerPath;
             AssetDatabase.DeleteAsset(path); // rebuild from scratch, no stale states
@@ -252,6 +255,7 @@ namespace CaseClosed.EditorTools.Prototype
             controller.AddParameter("VerticalSpeed", AnimatorControllerParameterType.Float);
             controller.AddParameter("Jump", AnimatorControllerParameterType.Trigger);
             controller.AddParameter("Land", AnimatorControllerParameterType.Trigger);
+            controller.AddParameter("Carrying", AnimatorControllerParameterType.Bool);
 
             var machine = controller.layers[0].stateMachine;
 
@@ -317,10 +321,144 @@ namespace CaseClosed.EditorTools.Prototype
             landToFall.duration = 0.08f;
             landToFall.AddCondition(AnimatorConditionMode.IfNot, 0f, "Grounded");
 
+            // Layer 1. Added last so the base locomotion machine above is complete
+            // before anything is stacked on top of it.
+            AddCarryLayer(controller, carry);
+
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
-            Debug.Log($"[Prototype] Animator controller written to {path}");
+            Debug.Log($"[Prototype] Animator controller written to {path} (2 layers)");
             return controller;
+        }
+
+        // ------------------------------------------------------------------
+        // carry
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Both arms forward with the elbows bent, hands framing the carry socket at
+        /// chest height. Deliberately a LOOPING pose rather than a single frame: a
+        /// one-frame clip is legal, but a slow sway stops a held folder looking like
+        /// it was welded to a statue.
+        ///
+        /// Only the arm chain is keyed. The upper-body mask means everything else —
+        /// hips, legs, torso lean, head — keeps coming from the locomotion layer, so
+        /// a carrying player still walks, runs and lands normally.
+        ///
+        /// Negative X swings a limb forward (children hang down -Y, character faces +Z).
+        ///
+        /// Z closes the arm ACROSS the body, and the sign is the opposite of the
+        /// ArmSplay constants above: POSITIVE tucks the left arm in, negative tucks
+        /// the right. Measured, not guessed — the first attempt used the splay
+        /// convention and pushed the hands to +/-0.394 m, wider apart than the
+        /// shoulders, with the folder floating in the gap between them.
+        ///
+        /// Leverage here is weak on purpose-built maths: once the arm is swung 100
+        /// degrees forward it points mostly along +Z, so rotating about Z barely
+        /// moves the hand in X. That is why these are ~18 and not ~5.
+        /// </summary>
+        private static AnimationClip BuildCarryPose()
+        {
+            var clip = NewClip("Proto_CarryPose", loop: true);
+
+            const float upperArm = -55f;   // shoulder forward
+            const float elbow = -45f;      // forearm up toward the chest
+            const float tuckL = 18f;       // hands drawn in toward the centre line
+            const float tuckR = -18f;
+
+            // 2.6s of barely-perceptible sway, matched on both arms so the folder
+            // does not appear to be squeezed.
+            SetEuler(clip, ArmL, Curve(Key(0f, upperArm), Key(1.3f, upperArm + 2.5f), Key(2.6f, upperArm)),
+                     0f, tuckL);
+            SetEuler(clip, ArmR, Curve(Key(0f, upperArm), Key(1.3f, upperArm + 2.5f), Key(2.6f, upperArm)),
+                     0f, tuckR);
+
+            SetEuler(clip, ForearmL, Curve(Key(0f, elbow), Key(1.3f, elbow - 2.5f), Key(2.6f, elbow)));
+            SetEuler(clip, ForearmR, Curve(Key(0f, elbow), Key(1.3f, elbow - 2.5f), Key(2.6f, elbow)));
+
+            // Wrists flat, so the hands read as supporting the folder from underneath.
+            SetEuler(clip, HandL, Curve(Key(0f, 12f), Key(2.6f, 12f)));
+            SetEuler(clip, HandR, Curve(Key(0f, 12f), Key(2.6f, 12f)));
+
+            return Save(clip);
+        }
+
+        /// <summary>
+        /// Upper-body mask, authored over TRANSFORM PATHS rather than humanoid body
+        /// parts — this rig is a plain joint hierarchy with no Avatar, so it is
+        /// Generic, and humanoid masks simply do not apply to it.
+        ///
+        /// Ancestors are listed but left inactive. They have to appear so the paths
+        /// resolve; activating Torso or Hips would let the carry pose override the
+        /// locomotion lean and bob, and the character would slide around rigid from
+        /// the waist up.
+        /// </summary>
+        private static AvatarMask BuildCarryMask()
+        {
+            var entries = new (string path, bool active)[]
+            {
+                ("", false),
+                ("Visual", false),
+                (Hips, false),
+                (Torso, false),
+                (Head, false),
+                (LegL, false),
+                (LegR, false),
+                (ShinL, false),
+                (ShinR, false),
+
+                // The only thing the carry pose is allowed to touch.
+                (ArmL, true),
+                (ArmR, true),
+                (ForearmL, true),
+                (ForearmR, true),
+                (HandL, true),
+                (HandR, true),
+            };
+
+            var mask = new AvatarMask { transformCount = entries.Length };
+            for (int i = 0; i < entries.Length; i++)
+            {
+                mask.SetTransformPath(i, entries[i].path);
+                mask.SetTransformActive(i, entries[i].active);
+            }
+
+            string path = $"{PrototypeAssets.AnimationFolder}/Proto_UpperBody.mask";
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(mask, path);
+            return AssetDatabase.LoadAssetAtPath<AvatarMask>(path);
+        }
+
+        /// <summary>
+        /// The carry layer sits ON TOP of locomotion at weight 0 and is faded in by
+        /// PlayerCarryVisual when custody says this player is holding something.
+        ///
+        /// Weight is driven from code rather than by a transition on the Carrying
+        /// bool, because the fade then has one owner instead of two that can
+        /// disagree. The bool is still declared — PlayerCarryVisual sets it, and
+        /// SetBool against a missing parameter warns every frame.
+        /// </summary>
+        private static void AddCarryLayer(AnimatorController controller, AnimationClip carry)
+        {
+            var machine = new AnimatorStateMachine
+            {
+                name = "Carry",
+                hideFlags = HideFlags.HideInHierarchy,
+            };
+            AssetDatabase.AddObjectToAsset(machine, controller);
+
+            var state = machine.AddState("CarryPose");
+            state.motion = carry;
+            machine.defaultState = state;
+
+            controller.AddLayer(new AnimatorControllerLayer
+            {
+                name = "Carry",
+                defaultWeight = 0f,
+                avatarMask = BuildCarryMask(),
+                blendingMode = AnimatorLayerBlendingMode.Override,
+                stateMachine = machine,
+            });
         }
 
         // ------------------------------------------------------------------

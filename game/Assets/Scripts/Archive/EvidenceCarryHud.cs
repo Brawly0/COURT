@@ -25,6 +25,11 @@ namespace CaseClosed.Game.Archive
         [Tooltip("Seconds an action banner stays up.")]
         public float BannerSeconds = 2.2f;
 
+        [Tooltip("Toggles the developer carry readout. Not part of the normal UI.")]
+        public Key DebugKey = Key.F6;
+
+        private bool _debug;
+
         /// <summary>Everything this player has legitimately read. Never shrinks.</summary>
         private readonly List<EvidenceDiscovery> _known = new();
 
@@ -43,6 +48,10 @@ namespace CaseClosed.Game.Archive
                 director.KnowledgeGranted += OnKnowledge;
                 director.CarryChanged -= OnCarryChanged;
                 director.CarryChanged += OnCarryChanged;
+                director.LocalRegistrationSucceeded -= OnRegistered;
+                director.LocalRegistrationSucceeded += OnRegistered;
+                director.RegistrationAnnounced -= OnRegistrationAnnounced;
+                director.RegistrationAnnounced += OnRegistrationAnnounced;
             }
 
             var keyboard = Keyboard.current;
@@ -51,6 +60,9 @@ namespace CaseClosed.Game.Archive
             if (System.Enum.IsDefined(typeof(Key), DropKey) &&
                 keyboard[DropKey].wasPressedThisFrame && director.LocalIsCarrying)
                 director.RequestDrop();
+
+            if (System.Enum.IsDefined(typeof(Key), DebugKey) && keyboard[DebugKey].wasPressedThisFrame)
+                _debug = !_debug;
         }
 
         private void OnDestroy()
@@ -59,6 +71,8 @@ namespace CaseClosed.Game.Archive
             if (director == null) return;
             director.KnowledgeGranted -= OnKnowledge;
             director.CarryChanged -= OnCarryChanged;
+            director.LocalRegistrationSucceeded -= OnRegistered;
+            director.RegistrationAnnounced -= OnRegistrationAnnounced;
         }
 
         private void OnKnowledge(EvidenceDiscovery packet)
@@ -72,8 +86,32 @@ namespace CaseClosed.Game.Archive
 
         private void OnCarryChanged(string title, bool carrying)
         {
+            // Registration also clears the carry HUD, and it announces itself. Do
+            // not also claim the folder was dropped.
+            if (Time.time < _suppressDropBannerUntil) return;
             if (!carrying && !string.IsNullOrEmpty(title)) Banner("EVIDENCE DROPPED");
         }
+
+        /// <summary>The registrant, and only the registrant, learns which document it was.</summary>
+        private void OnRegistered(string title)
+        {
+            _suppressDropBannerUntil = Time.time + 0.5f;
+            Banner($"EVIDENCE REGISTERED\n{title}");
+        }
+
+        /// <summary>
+        /// Everyone sees this. Note what it can say: an id and a team, because that
+        /// is all the packet carries. There is no title here to leak.
+        /// </summary>
+        private void OnRegistrationAnnounced(EvidenceRegistrationNotice notice)
+        {
+            var team = (CaseClosed.Game.Cases.Roles.PlayerTeam)notice.Team;
+            _publicLog.Add($"{notice.EvidenceId}  registered by {team}");
+            if (_publicLog.Count > 8) _publicLog.RemoveAt(0);
+        }
+
+        private float _suppressDropBannerUntil;
+        private readonly List<string> _publicLog = new();
 
         private void Banner(string text)
         {
@@ -88,6 +126,64 @@ namespace CaseClosed.Game.Archive
             DrawCarryIndicator();
             DrawBanner();
             DrawInspect();
+            DrawPublicRegister();
+            DrawCarryDebug();
+        }
+
+        /// <summary>
+        /// The public record, visible to everyone including the opposing team.
+        ///
+        /// It can only ever show an id and a team, because that is the entire
+        /// contents of EvidenceRegistrationNotice. The opposing side learns that the
+        /// other team has entered something — which is the intended pressure — and
+        /// nothing about what the document says.
+        /// </summary>
+        private void DrawPublicRegister()
+        {
+            if (_publicLog.Count == 0) return;
+
+            float w = 300f, h = 30f + _publicLog.Count * 18f;
+            float x = 16f, y = 16f;
+
+            GUI.DrawTexture(new Rect(x, y, w, h), _panel);
+            GUI.DrawTexture(new Rect(x, y, 3f, h), _accent);
+            GUI.Label(new Rect(x + 12f, y + 5f, w - 20f, 18f), "EVIDENCE REGISTERED", _small);
+
+            for (int i = 0; i < _publicLog.Count; i++)
+                GUI.Label(new Rect(x + 12f, y + 24f + i * 18f, w - 20f, 18f), _publicLog[i], _body);
+        }
+
+        /// <summary>
+        /// Developer readout, off by default and behind its own key. Shows every
+        /// evidence body this machine knows about, so "the folder is in the wrong
+        /// place" can be told apart from "custody says something different from what
+        /// I am looking at" — which are completely different bugs.
+        /// </summary>
+        private void DrawCarryDebug()
+        {
+            if (!_debug) return;
+
+            var bodies = PhysicalEvidence.DebugSnapshot();
+
+            float w = 470f, h = 44f + Mathf.Max(1, bodies.Count) * 46f;
+            float x = Screen.width - w - 16f, y = 150f;
+
+            GUI.DrawTexture(new Rect(x, y, w, h), _panel);
+            GUILayout.BeginArea(new Rect(x + 12f, y + 8f, w - 24f, h - 16f));
+
+            GUILayout.Label($"CARRY DEBUG  [{DebugKey}]", _heading);
+            DrawCameraDebug();
+
+            if (bodies.Count == 0)
+            {
+                GUILayout.Label("No evidence bodies spawned.", _small);
+            }
+            else
+            {
+                foreach (var line in bodies) GUILayout.Label(line, _small);
+            }
+
+            GUILayout.EndArea();
         }
 
         /// <summary>Bottom-centre, always visible while holding something.</summary>
@@ -154,6 +250,34 @@ namespace CaseClosed.Game.Archive
             }
 
             GUILayout.EndArea();
+        }
+
+        /// <summary>
+        /// Camera-mode readout, alongside the carry state so the two can be compared
+        /// in one glance — "folder is at the socket but I cannot see it" is a very
+        /// different bug from "the camera is somewhere unexpected".
+        /// </summary>
+        private void DrawCameraDebug()
+        {
+            var rig = FindAnyObjectByType<CaseClosed.Game.Prototype.PlayerCameraRig>();
+            if (rig == null) { GUILayout.Label("no camera rig", _small); return; }
+
+            string body = "-";
+            string carryOffset = "-";
+            if (rig.Target != null)
+            {
+                var local = rig.Target.GetComponent<CaseClosed.Game.Prototype.PlayerLocalBody>();
+                body = local == null ? "n/a" : (local.LocalBodyVisible ? "visible" : "hidden");
+
+                var socket = rig.Target.GetComponent<CaseClosed.Game.Prototype.PlayerCarrySocket>();
+                carryOffset = socket == null ? "n/a" : socket.LocalViewOffset.ToString("F2");
+            }
+
+            GUILayout.Label(
+                $"mode={rig.Mode}  blend={rig.ModeBlend:F2}  dist={rig.CurrentDistance:F2}\n" +
+                $"pivot={rig.Pivot:F2}\n" +
+                $"localBody={body}  carryLocalOffset={carryOffset}", _small);
+            GUILayout.Space(4f);
         }
 
         private void EnsureStyles()

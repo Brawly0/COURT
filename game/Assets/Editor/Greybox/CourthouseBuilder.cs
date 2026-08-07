@@ -511,6 +511,17 @@ namespace CaseClosed.EditorTools.Greybox
                     new Vector3(0f, -50f, 0f),               // parked below the world
                     new Vector3(0.32f, 0.05f, 0.42f), GreyboxKit.Bench);
 
+                // NOT STATIC, and this is not optional. GreyboxKit.Box marks
+                // everything BatchingStatic/OccluderStatic/ContributeGI, which is
+                // right for walls and catastrophic here: static batching bakes the
+                // mesh into a combined buffer at its authoring position, so the
+                // transform moves at runtime and the pixels never do. A folder
+                // picked up or dropped would keep drawing at this parking spot,
+                // 50 m under the floor — visible nowhere, while every state check
+                // reports it is exactly where it should be.
+                GameObjectUtility.SetStaticEditorFlags(body, 0);
+                body.isStatic = false;
+
                 body.AddComponent<Unity.Netcode.NetworkObject>();
 
                 var evidence = body.AddComponent<CaseClosed.Game.Archive.PhysicalEvidence>();

@@ -64,6 +64,10 @@ namespace CaseClosed.Game.Prototype
         [Tooltip("Movement is relative to this. Leave empty and it finds the main camera.")]
         public Transform CameraTransform;
 
+        [Tooltip("First person: face where the camera looks instead of where we are moving. " +
+                 "Set by PlayerCameraRig; not something to toggle by hand.")]
+        public bool FaceCameraYaw = false;
+
         private CharacterController _controller;
         private PlayerInputReader _input;
 
@@ -242,6 +246,29 @@ namespace CaseClosed.Game.Prototype
         /// </summary>
         private void FaceMovementDirection()
         {
+            // FIRST PERSON: the body follows the CAMERA's yaw rather than its own
+            // velocity, so the model everyone else sees faces where this player is
+            // actually looking. Strafing then reads correctly to observers, and
+            // standing still no longer leaves the body pointing wherever it last
+            // walked — which is why this runs BEFORE the "are we moving" test below.
+            //
+            // YAW ONLY. Pitch stays on the camera; tipping the whole body would put
+            // the feet through the floor the moment you looked down.
+            //
+            // No feedback loop: the camera pivot is derived from the body's POSITION
+            // and never its rotation. Reusing _turnVelocity means a mode switch
+            // inherits the in-flight turn instead of restarting it, so toggling
+            // mid-turn does not snap.
+            if (FaceCameraYaw && CameraTransform != null)
+            {
+                float cameraYaw = CameraTransform.eulerAngles.y;
+                float turned = Mathf.SmoothDampAngle(
+                    transform.eulerAngles.y, cameraYaw, ref _turnVelocity, TurnSmoothTime);
+
+                transform.rotation = Quaternion.Euler(0f, turned, 0f);
+                return;
+            }
+
             Vector3 flat = new Vector3(_planarVelocity.x, 0f, _planarVelocity.z);
             if (flat.sqrMagnitude < 0.01f) return;
 

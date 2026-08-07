@@ -32,9 +32,67 @@ namespace CaseClosed.Game.Archive
         InContainer = 0,   // still filed, not yet revealed
         InWorld = 1,       // lying somewhere, free to pick up
         Carried = 2,       // in a specific player's hands
+        InLocker = 3,      // handed in at the Evidence Locker. Terminal.
 
         // Reserved, NOT implemented:
-        // Registered = 3, Destroyed = 4,
+        // Destroyed = 4,
+    }
+
+    /// <summary>
+    /// Whether the evidence has been formally entered into the record. The THIRD
+    /// dimension, and deliberately not folded into either of the other two.
+    ///
+    /// WHY NOT REUSE CUSTODY. "Registered" was originally reserved as a custody
+    /// value, but custody answers WHERE THE PAPER IS and registration is a legal
+    /// act, not a location. Overloading it would make two different questions share
+    /// one field: an item in the locker but not yet registered, or registered and
+    /// later moved, would both become unrepresentable. Custody gained
+    /// <see cref="EvidenceCustody.InLocker"/> — a place — and this enum owns the
+    /// legal question on its own.
+    ///
+    /// WHY NOT REUSE KNOWLEDGE. Knowledge is per-player and only ever grows.
+    /// Registration is a single fact about the item, true for everyone at once.
+    ///
+    /// Later this grows to Processed / Admissible / Struck. Only the two below are
+    /// implemented.
+    /// </summary>
+    public enum EvidenceLegalState : byte
+    {
+        Unregistered = 0,
+        Registered = 1,
+
+        // Reserved, NOT implemented:
+        // Processed = 2, Admissible = 3, Struck = 4,
+    }
+
+    /// <summary>What happened to a piece of evidence. Chain-of-custody vocabulary.</summary>
+    public enum CustodyEventType : byte
+    {
+        Discovered = 0,
+        PickedUp = 1,
+        Dropped = 2,
+        DroppedOnDisconnect = 3,
+        Registered = 4,
+    }
+
+    /// <summary>
+    /// One line in an evidence item's history. SERVER-OWNED: this type is not
+    /// INetworkSerializable and lives only on <see cref="EvidenceInstance"/>, which
+    /// is host memory. Admissibility, tampering and the end-of-match reveal will all
+    /// need to ask "who touched this, when" — recording it now costs nothing and
+    /// cannot be reconstructed later.
+    /// </summary>
+    public sealed class CustodyEvent
+    {
+        public CustodyEventType Type;
+        public ulong ClientId = EvidenceInstance.NoCarrier;
+        public PlayerTeam Team = PlayerTeam.None;
+        public float Time;
+        public UnityEngine.Vector3 Location;
+
+        public override string ToString() =>
+            $"{Time,7:F1}s  {Type,-20} client={(ClientId == EvidenceInstance.NoCarrier ? "-" : ClientId.ToString())}" +
+            $"  team={Team}  at {Location}";
     }
 
     /// <summary>
@@ -66,13 +124,46 @@ namespace CaseClosed.Game.Archive
         public ulong CarrierClientId = NoCarrier;
         public UnityEngine.Vector3 WorldPosition;
 
+        // ---- legal status ----
+        public EvidenceLegalState LegalState = EvidenceLegalState.Unregistered;
+        public ulong RegisteredByClientId = NoCarrier;
+        public PlayerTeam RegisteredByTeam = PlayerTeam.None;
+        public float RegisteredAtTime = -1f;
+
+        /// <summary>
+        /// Everything that has happened to this item, oldest first. Server-only.
+        /// </summary>
+        public readonly List<CustodyEvent> History = new();
+
         public const ulong NoCarrier = ulong.MaxValue;
 
         public bool IsFound => Knowledge != EvidenceKnowledge.Undiscovered;
         public bool IsCarried => Custody == EvidenceCustody.Carried;
         public bool IsOnTheFloor => Custody == EvidenceCustody.InWorld;
+        public bool IsRegistered => LegalState == EvidenceLegalState.Registered;
+
+        /// <summary>
+        /// Registration is terminal in this prototype: once in the locker the item
+        /// never returns to a hand or a floor. Every transition that would move it
+        /// checks this.
+        /// </summary>
+        public bool IsLockedAway => Custody == EvidenceCustody.InLocker;
 
         public bool IsKnownBy(ulong clientId) => KnownBy.Contains(clientId);
+
+        /// <summary>Appends to the history. The only way events are added.</summary>
+        public void Record(CustodyEventType type, ulong clientId, PlayerTeam team,
+                           float time, UnityEngine.Vector3 location)
+        {
+            History.Add(new CustodyEvent
+            {
+                Type = type,
+                ClientId = clientId,
+                Team = team,
+                Time = time,
+                Location = location,
+            });
+        }
 
         /// <summary>
         /// First discovery. One-way; returns false if already found, which is the
@@ -89,6 +180,7 @@ namespace CaseClosed.Game.Archive
             FoundAtTime = time;
 
             KnownBy.Add(clientId);
+            Record(CustodyEventType.Discovered, clientId, team, time, WorldPosition);
             return true;
         }
 
@@ -102,8 +194,10 @@ namespace CaseClosed.Game.Archive
 
         public bool TryPickUp(ulong clientId)
         {
-            // Only a loose item can be picked up. Still filed, or already in
-            // somebody's hands, and the answer is no.
+            // Only a loose item can be picked up. Still filed, already in somebody's
+            // hands, or handed in at the locker, and the answer is no. The InWorld
+            // test alone already excludes InLocker — this is not a second guard, it
+            // is the same one, which is the point of custody being single-valued.
             if (Custody != EvidenceCustody.InWorld) return false;
 
             Custody = EvidenceCustody.Carried;
@@ -124,12 +218,51 @@ namespace CaseClosed.Game.Archive
             return true;
         }
 
-        /// <summary>Discovery reveals the item into the world at the container.</summary>
-        public void PlaceInWorld(UnityEngine.Vector3 position)
+        /// <summary>
+        /// Discovery reveals the item into the world at the container.
+        ///
+        /// Refuses once the item is in the locker. Without this a placement rebuild
+        /// or a test fixture could quietly resurrect registered evidence back onto
+        /// the floor, and the same document would exist twice in the record.
+        /// </summary>
+        public bool PlaceInWorld(UnityEngine.Vector3 position)
         {
+            if (IsLockedAway) return false;
+
             Custody = EvidenceCustody.InWorld;
             CarrierClientId = NoCarrier;
             WorldPosition = position;
+            return true;
+        }
+
+        /// <summary>
+        /// The registration transition. SERVER ONLY, and the single place legal
+        /// state can change.
+        ///
+        /// Takes the item out of the carrier's hands and into the locker in the same
+        /// step, because those two facts must never disagree: a registered document
+        /// still in someone's pocket is exactly the ambiguity this milestone exists
+        /// to avoid.
+        ///
+        /// Knowledge is untouched. Everyone who read it still remembers it.
+        /// </summary>
+        public bool TryRegister(ulong clientId, PlayerTeam team, float time)
+        {
+            if (LegalState != EvidenceLegalState.Unregistered) return false;  // already done
+            if (Custody != EvidenceCustody.Carried) return false;             // must be in hand
+            if (CarrierClientId != clientId) return false;                    // and in YOUR hand
+            if (!IsFound) return false;                                       // cannot register a rumour
+
+            LegalState = EvidenceLegalState.Registered;
+            RegisteredByClientId = clientId;
+            RegisteredByTeam = team;
+            RegisteredAtTime = time;
+
+            Custody = EvidenceCustody.InLocker;
+            CarrierClientId = NoCarrier;
+
+            Record(CustodyEventType.Registered, clientId, team, time, WorldPosition);
+            return true;
         }
 
         /// <summary>
@@ -137,11 +270,14 @@ namespace CaseClosed.Game.Archive
         /// disappearing with them — evidence must never leave the building because
         /// somebody's wifi died.
         /// </summary>
-        public void ForceDrop(UnityEngine.Vector3 position)
+        public bool ForceDrop(UnityEngine.Vector3 position)
         {
+            if (IsLockedAway) return false;   // registered evidence never returns to the floor
+
             Custody = EvidenceCustody.InWorld;
             CarrierClientId = NoCarrier;
             WorldPosition = position;
+            return true;
         }
     }
 
@@ -152,6 +288,34 @@ namespace CaseClosed.Game.Archive
     /// The record and nothing else: no perpetrator, no guilt, no proof-chain
     /// position, no hint as to whether this item matters.
     /// </summary>
+    /// <summary>
+    /// The PUBLIC fact that a registration happened. Broadcast to everyone.
+    ///
+    /// WHAT IS DELIBERATELY ABSENT: title, kind, description, container, relevance.
+    /// "Item E-003 was registered by the Prosecution" tells the defence that the
+    /// other side has something, which is fair and is half the tension of the game.
+    /// "Catering schedule: places staff by slot" would hand them a document they
+    /// never found, and there is no way to un-send it.
+    ///
+    /// The contents travel separately, in <see cref="EvidenceDiscovery"/>, to
+    /// players who earned them. Keeping the two structs apart is what makes the
+    /// leak impossible rather than merely avoided — there is no field here to put
+    /// the contents in.
+    /// </summary>
+    public struct EvidenceRegistrationNotice : INetworkSerializable
+    {
+        public FixedString64Bytes EvidenceId;
+        public byte Team;            // PlayerTeam of the registrant
+        public float MatchTime;
+
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref EvidenceId);
+            serializer.SerializeValue(ref Team);
+            serializer.SerializeValue(ref MatchTime);
+        }
+    }
+
     public struct EvidenceDiscovery : INetworkSerializable
     {
         public FixedString64Bytes EvidenceId;

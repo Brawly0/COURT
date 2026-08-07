@@ -116,9 +116,11 @@ namespace CaseClosed.Game.Cases.Roles
                 case PlayerRole.DefenseAttorney:
                     return "You may question your client privately. (Interview: not yet implemented.)";
                 case PlayerRole.Prosecutor:
-                    return "You register evidence for trial. (Registration: not yet implemented.)";
+                    return "You register evidence for trial. Carry a document to the " +
+                           "Evidence Locker and hold E at the desk.";
                 case PlayerRole.Investigator:
-                    return "You search and process the scene. (Searching: not yet implemented.)";
+                    return "You search and process the scene. Search the Archive, then " +
+                           "register what you find. (Processing: not yet implemented.)";
                 default:
                     return "-";
             }

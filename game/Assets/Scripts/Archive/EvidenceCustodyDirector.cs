@@ -36,6 +36,12 @@ namespace CaseClosed.Game.Archive
         [Tooltip("Height above the carrier's feet at which it is released.")]
         public float DropHeight = 0.35f;
 
+        [Tooltip("Height the drop is projected from. Roughly where the folder is held.")]
+        public float DropChestHeight = 1.2f;
+
+        [Tooltip("Half-width kept clear of walls when placing a dropped item.")]
+        public float DropClearance = 0.22f;
+
         /// <summary>Physical objects, pooled in the scene. Server-side lookup by evidence id.</summary>
         private readonly Dictionary<string, PhysicalEvidence> _bodies = new();
 
@@ -146,6 +152,8 @@ namespace CaseClosed.Game.Archive
             }
 
             body.ServerSetCarried(clientId);
+            instance.Record(CustodyEventType.PickedUp, clientId, TeamOf(clientId),
+                            Time.time, body.transform.position);
 
             Debug.Log($"[Custody] {instance.EvidenceId} picked up by client {clientId}.");
 
@@ -186,13 +194,31 @@ namespace CaseClosed.Game.Archive
             if (_bodies.TryGetValue(instance.EvidenceId, out var body))
                 body.ServerSetInWorld(position);
 
+            instance.Record(CustodyEventType.Dropped, clientId, TeamOf(clientId), Time.time, position);
+
             Debug.Log($"[Custody] {instance.EvidenceId} dropped by client {clientId} at {position}.");
             NotifyCarry(clientId, instance.Source.Title, false);
         }
 
         /// <summary>
-        /// In front of the carrier, at floor level where possible. Raycast down so
-        /// it lands on the floor rather than hovering or sinking through it.
+        /// In front of the carrier, on the floor, and never through a wall.
+        ///
+        /// THREE STEPS, EACH FIXING A REAL FAILURE:
+        ///
+        /// 1. Sphere-cast FORWARD first. Projecting blindly to DropForward puts the
+        ///    folder on the far side of any wall the player happens to be facing —
+        ///    stand nose-to-wall in the Archive and the evidence lands in the
+        ///    corridor. The cast shortens the reach to whatever is actually clear.
+        ///
+        /// 2. Raycast DOWN from there, so it rests on the floor rather than hovering
+        ///    at chest height or sinking through it.
+        ///
+        /// 3. Fall back to the carrier's own feet if either fails. Their feet are
+        ///    provably a reachable spot on the floor — they are standing on it —
+        ///    which is the one position that cannot be inside geometry.
+        ///
+        /// None of this consults the client. A client-supplied position could post
+        /// evidence anywhere on the map.
         /// </summary>
         private Vector3 ComputeDropPosition(ulong clientId)
         {
@@ -203,15 +229,110 @@ namespace CaseClosed.Game.Archive
             var player = client.PlayerObject;
             if (player == null) return Vector3.zero;
 
-            Vector3 origin = player.transform.position + Vector3.up * 1.2f;
-            Vector3 ahead = origin + player.transform.forward * DropForward;
+            Vector3 feet = player.transform.position;
+            Vector3 chest = feet + Vector3.up * DropChestHeight;
+            Vector3 forward = player.transform.forward;
 
-            if (Physics.Raycast(ahead, Vector3.down, out var hit, 4f, ~0, QueryTriggerInteraction.Ignore))
-                return hit.point + Vector3.up * DropHeight;
+            // 1. How far forward is actually clear? A sphere rather than a ray, so the
+            //    folder does not squeeze into a gap narrower than itself.
+            float reach = DropForward;
+            if (Physics.SphereCast(chest, DropClearance, forward, out var blocker,
+                                   DropForward, ~0, QueryTriggerInteraction.Ignore))
+                reach = Mathf.Max(0f, blocker.distance - DropClearance);
 
-            return player.transform.position + player.transform.forward * DropForward
-                   + Vector3.up * DropHeight;
+            Vector3 ahead = chest + forward * reach;
+
+            // 2. Down to the floor.
+            if (Physics.Raycast(ahead, Vector3.down, out var ground, DropChestHeight + 2f,
+                                ~0, QueryTriggerInteraction.Ignore))
+                return ground.point + Vector3.up * DropHeight;
+
+            // 3. Nothing underneath the forward point — a ledge, a gap, the void.
+            //    Their own feet are known-good floor.
+            return feet + Vector3.up * DropHeight;
         }
+
+        // ------------------------------------------------------------------
+        // registration
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// SERVER ONLY. Registers whatever this player is actually carrying.
+        ///
+        /// NOTE THE SIGNATURE: no EvidenceId. The terminal cannot pass one and the
+        /// client never sent one — the server looks up the carrier's own item. That
+        /// is what makes "register someone else's evidence" and "register a
+        /// fabricated id" unrepresentable rather than merely rejected.
+        ///
+        /// By the time this runs, RegistrationTerminal.ServerValidate has passed on
+        /// every frame of the hold, so distance, sight, the lock, discovery, sole
+        /// carriership and "not already registered" all still held a moment ago.
+        /// The transition re-checks them anyway, because a validation that ran a
+        /// frame earlier is not a guarantee.
+        /// </summary>
+        public void ServerRegisterCarried(ulong clientId, Vector3 terminalPosition)
+        {
+            if (!IsServer) return;
+
+            var instance = CarriedBy(clientId);
+            if (instance == null) { Notify(clientId, "No evidence carried."); return; }
+            if (instance.IsRegistered) { Notify(clientId, "Already registered."); return; }
+
+            var team = TeamOf(clientId);
+            if (!instance.TryRegister(clientId, team, Time.time))
+            {
+                Notify(clientId, "Registration interrupted.");
+                return;
+            }
+
+            // The paper physically leaves play: out of the hands, into the locker.
+            // Recalling the body is what makes the folder vanish from the carrier's
+            // socket on every machine, because presentation is derived from custody.
+            if (_bodies.TryGetValue(instance.EvidenceId, out var body))
+            {
+                body.ServerRelease();
+                _bodies.Remove(instance.EvidenceId);
+            }
+
+            Debug.Log($"[Custody] {instance.EvidenceId} REGISTERED by client {clientId} ({team}). " +
+                      $"History: {instance.History.Count} events.");
+
+            // Two separate messages, deliberately. The registrant learns which
+            // document; everyone learns only that a registration happened.
+            RegistrationResultClientRpc(Clip128(instance.Source.Title), new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+            });
+
+            PublicRegistrationClientRpc(new EvidenceRegistrationNotice
+            {
+                EvidenceId = Clip64(instance.EvidenceId),
+                Team = (byte)team,
+                MatchTime = Time.time,
+            });
+
+            NotifyCarry(clientId, instance.Source.Title, false);   // clears the carry HUD
+        }
+
+        private static PlayerTeam TeamOf(ulong clientId) =>
+            PlayerRoster.Instance != null
+                ? RoleInfo.TeamOf(PlayerRoster.Instance.RoleOf(clientId))
+                : PlayerTeam.None;
+
+        /// <summary>Raised on every client when any evidence is registered. Safe payload.</summary>
+        public event System.Action<EvidenceRegistrationNotice> RegistrationAnnounced;
+
+        /// <summary>Raised on the registering client only, with the item's title.</summary>
+        public event System.Action<string> LocalRegistrationSucceeded;
+
+        [ClientRpc]
+        private void PublicRegistrationClientRpc(EvidenceRegistrationNotice notice)
+            => RegistrationAnnounced?.Invoke(notice);
+
+        [ClientRpc]
+        private void RegistrationResultClientRpc(Unity.Collections.FixedString128Bytes title,
+                                                 ClientRpcParams p = default)
+            => LocalRegistrationSucceeded?.Invoke(title.ToString());
 
         // ------------------------------------------------------------------
         // disconnect
@@ -235,10 +356,13 @@ namespace CaseClosed.Game.Archive
             foreach (var instance in carried)
             {
                 Vector3 where = LastKnownPosition(clientId, instance);
-                instance.ForceDrop(where);
+                if (!instance.ForceDrop(where)) continue;   // registered items stay put
 
                 if (_bodies.TryGetValue(instance.EvidenceId, out var body))
                     body.ServerSetInWorld(where);
+
+                instance.Record(CustodyEventType.DroppedOnDisconnect, clientId,
+                                TeamOf(clientId), Time.time, where);
 
                 Debug.Log($"[Custody] Carrier {clientId} disconnected — " +
                           $"{instance.EvidenceId} dropped at {where}, still in play.");
