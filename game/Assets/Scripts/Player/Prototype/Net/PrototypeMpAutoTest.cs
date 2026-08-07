@@ -35,6 +35,11 @@ namespace CaseClosed.Game.Prototype.Net
         private bool _test;
         private bool _voiceTone;
         private bool _toneApplied;
+        private bool _wantsCase;
+        private bool _caseRequested;
+        private ulong _caseSeed;
+        private float _leaveAfter = -1f;
+        private bool _left;
         private float _t;
         private int _phase = -1;
 
@@ -56,6 +61,25 @@ namespace CaseClosed.Game.Prototype.Net
             // -voicetone makes this instance transmit a synthetic tone, so proximity
             // voice can be verified end to end without a microphone.
             _voiceTone = args.Contains("-voicetone");
+
+            // -caseseed <n> makes the HOST generate a case once everyone is connected,
+            // so case replication and secrecy can be checked across two processes.
+            // -leaveafter <seconds> makes this instance shut down cleanly mid-test.
+            // A hard kill is NOT equivalent: it sends nothing, so the server only
+            // notices after the transport timeout (~30 s), which is longer than the
+            // test runs. Graceful leave is also what a player clicking DISCONNECT does.
+            int leaveIndex = Array.IndexOf(args, "-leaveafter");
+            if (leaveIndex >= 0 && leaveIndex + 1 < args.Length &&
+                float.TryParse(args[leaveIndex + 1], out float leaveAt))
+                _leaveAfter = leaveAt;
+
+            int caseIndex = Array.IndexOf(args, "-caseseed");
+            if (caseIndex >= 0 && caseIndex + 1 < args.Length &&
+                ulong.TryParse(args[caseIndex + 1], out ulong parsedSeed))
+            {
+                _caseSeed = parsedSeed;
+                _wantsCase = true;
+            }
 
             if (_mode == "host")
             {
@@ -90,6 +114,15 @@ namespace CaseClosed.Game.Prototype.Net
             _t += Time.deltaTime;
             if (_t < 5f) return; // let both sides connect and spawn first
 
+            if (_leaveAfter > 0f && !_left && _t > _leaveAfter)
+            {
+                _left = true;
+                Debug.Log("[MPPROTO] leaving the session cleanly");
+                NetworkManager.Singleton.Shutdown();
+                Application.Quit();
+                return;
+            }
+
             float elapsed = _t - 5f;
 
             if (_voiceTone && !_toneApplied)
@@ -103,6 +136,29 @@ namespace CaseClosed.Game.Prototype.Net
                     _toneApplied = true;
                     Debug.Log("[MPPROTO] transmitting synthetic voice tone");
                 }
+            }
+
+            // Host generates once, a few seconds in, so the client is connected and
+            // we can observe replication rather than initial spawn state.
+            if (_wantsCase && !_caseRequested && _mode == "host" && elapsed > 3f)
+            {
+                var flow = CaseClosed.Game.Match.MatchFlowController.Instance;
+                if (flow != null && flow.IsSpawned)
+                {
+                    // The whole sequence: roles, case, briefings, then wait on Ready.
+                    flow.HostStartMatch(_caseSeed);
+                    _caseRequested = true;
+                }
+            }
+
+            // Every instance presses Ready a moment after its briefing arrives, so
+            // the ready count and the phase advance can be observed across processes.
+            var matchFlow = CaseClosed.Game.Match.MatchFlowController.Instance;
+            if (matchFlow != null && matchFlow.IsSpawned && matchFlow.HasBriefing &&
+                !matchFlow.LocalReadySent && elapsed > 6f)
+            {
+                matchFlow.RequestReady();
+                Debug.Log("[MPREADY] pressed READY");
             }
 
             // walk -> run -> sprint -> jump -> back, on a loop.
@@ -127,8 +183,66 @@ namespace CaseClosed.Game.Prototype.Net
             if (_t > 24f) Application.Quit();
         }
 
+        /// <summary>
+        /// The line that proves secrecy across processes: every instance prints
+        /// whether it holds the hidden truth. The host must say YES, the client NO.
+        /// </summary>
+        private void ReportCase()
+        {
+            var controller = CaseClosed.Game.Cases.CaseNetworkController.Instance;
+            if (controller == null || !controller.IsSpawned) return;
+
+            var vault = CaseClosed.Game.Cases.ActiveCaseManager.Instance;
+            bool holdsTruth = vault != null && vault.HasCase;
+            var info = controller.PublicInfo;
+            var view = controller.LocalView;
+
+            Debug.Log($"[MPCASE] role={(_mode == "host" ? "HOST  " : "CLIENT")} " +
+                      $"state={controller.State} " +
+                      $"holdsHiddenTruth={(holdsTruth ? "YES" : "NO")} " +
+                      $"publicTitle=\"{info.Title}\" " +
+                      $"publicSeed={info.Seed}");
+
+            if (controller.HasLocalView)
+                Debug.Log($"[MPCASE] {(_mode == "host" ? "HOST  " : "CLIENT")} " +
+                          $"myRole={view.Role} knowsGuilt={view.KnowsOwnGuilt} guiltBit={view.IsActuallyGuilty}");
+
+            // Briefing + readiness, per machine. The guilt field is printed for every
+            // role on purpose: if a non-defendant ever shows guilt=True, that is the
+            // leak this whole milestone exists to prevent.
+            var flow = CaseClosed.Game.Match.MatchFlowController.Instance;
+            if (flow != null && flow.IsSpawned)
+            {
+                var card = flow.LocalBriefing;
+                Debug.Log($"[MPBRIEF] {(_mode == "host" ? "HOST  " : "CLIENT")} " +
+                          $"phase={flow.Phase} " +
+                          $"role={card.Role} team={card.Team} " +
+                          $"knowsGuilt={card.KnowsOwnGuilt} guiltBit={card.IsActuallyGuilty} " +
+                          $"ready={flow.ReadyCount}/{flow.RequiredCount}");
+            }
+
+            // The roster is public, so every machine should agree on the table.
+            var roster = CaseClosed.Game.Cases.Roles.PlayerRoster.Instance;
+            if (roster != null && roster.IsSpawned && roster.Count > 0)
+            {
+                var seats = new System.Text.StringBuilder();
+                foreach (var pair in roster.Snapshot()) seats.Append($"{pair.Key}:{pair.Value} ");
+
+                Debug.Log($"[MPROLE] {(_mode == "host" ? "HOST  " : "CLIENT")} " +
+                          $"localRole={roster.LocalRole} " +
+                          $"defendantMissing={roster.DefendantMissing} " +
+                          $"table=[ {seats}]");
+            }
+
+            if (holdsTruth)
+                Debug.Log($"[MPCASE] HOST   truthDigest={vault.Truth.Digest().Substring(0, 30)} " +
+                          $"perp={vault.Truth.File.Perpetrator ?? "-"}");
+        }
+
         private void Report()
         {
+            ReportCase();
+
             foreach (var player in FindObjectsByType<PrototypeNetPlayer>())
             {
                 var movement = player.GetComponent<PlayerMovement>();

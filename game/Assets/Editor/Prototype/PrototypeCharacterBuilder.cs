@@ -229,6 +229,13 @@ namespace CaseClosed.EditorTools.Prototype
             sync.Animator = animator;
 
             AddVoiceComponents(root);
+
+            // Looks for interactables. Switched off on remote copies by
+            // PrototypeNetPlayer, alongside input and movement.
+            root.AddComponent<CaseClosed.Game.Interaction.PlayerInteractionDetector>();
+
+            // Lets line-of-sight checks skip player bodies cheaply.
+            root.AddComponent<CaseClosed.Game.Interaction.PlayerRosterMarker>();
         }
 
         /// <summary>

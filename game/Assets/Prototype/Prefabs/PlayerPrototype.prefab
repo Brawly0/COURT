@@ -505,6 +505,8 @@ GameObject:
   - component: {fileID: 943954597925781602}
   - component: {fileID: 2724987048140661672}
   - component: {fileID: 2081513619102626805}
+  - component: {fileID: 2052906927196342542}
+  - component: {fileID: 3300247997159508670}
   m_Layer: 0
   m_Name: PlayerPrototype
   m_TagString: Untagged
@@ -655,7 +657,7 @@ MonoBehaviour:
   SynchronizeTransform: 1
   m_InScenePlaced: 0
   ActiveSceneSynchronization: 0
-  SceneMigrationSynchronization: 0
+  SceneMigrationSynchronization: 1
   SpawnWithObservers: 1
   DontDestroyWithOwner: 0
   AutoObjectParentSync: 1
@@ -921,6 +923,37 @@ MonoBehaviour:
   HeadHeight: 1.5
   Capture: {fileID: 943954597925781602}
   Playback: {fileID: 2724987048140661672}
+--- !u!114 &2052906927196342542
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2215208945586700513}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8fcf60faf4af6444fbd5fc81acc4854c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Interaction.PlayerInteractionDetector
+  Range: 3.5
+  ProbeRadius: 0.18
+  Mask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  InteractKey: 19
+  DrawDebugRay: 0
+--- !u!114 &3300247997159508670
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2215208945586700513}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8407adf94d3bcfb4fbddfebb03d2e79e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Interaction.PlayerRosterMarker
 --- !u!1 &2303928418868149172
 GameObject:
   m_ObjectHideFlags: 0

@@ -60,6 +60,14 @@ namespace CaseClosed.Game.Prototype.Net
         {
             Teleport(SpawnSlot(OwnerClientId));
             AttachCameraAndHud();
+
+            // Tell the detector which body is ours, so it can ignore our own colliders.
+            var detector = GetComponent<Interaction.PlayerInteractionDetector>();
+            if (detector != null)
+            {
+                detector.enabled = true;
+                detector.Bind(transform);
+            }
         }
 
         /// <summary>
@@ -80,6 +88,11 @@ namespace CaseClosed.Game.Prototype.Net
             // NetworkTransform, which freezes remote players where they spawned.
             // A remote copy is a pure puppet and must not have one running.
             if (_controller != null) _controller.enabled = false;
+
+            // A remote copy must never raycast for interactables: it is not our
+            // camera, and its requests would be made in our name.
+            var detector = GetComponent<Interaction.PlayerInteractionDetector>();
+            if (detector != null) detector.enabled = false;
         }
 
         /// <summary>

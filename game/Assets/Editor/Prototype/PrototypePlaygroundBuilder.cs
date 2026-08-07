@@ -275,6 +275,10 @@ namespace CaseClosed.EditorTools.Prototype
             var nm = nmGo.AddComponent<NetworkManager>();
             var transport = nmGo.AddComponent<UnityTransport>();
 
+            // See CourthouseBuilder: NetworkConfig can come back null on a component
+            // added in edit mode, depending on what ran just before.
+            if (nm.NetworkConfig == null) nm.NetworkConfig = new NetworkConfig();
+
             nm.NetworkConfig.NetworkTransport = transport;
             nm.NetworkConfig.PlayerPrefab = playerPrefab;
             nm.NetworkConfig.ConnectionApproval = false;

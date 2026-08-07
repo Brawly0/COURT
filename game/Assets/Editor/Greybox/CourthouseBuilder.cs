@@ -199,12 +199,62 @@ namespace CaseClosed.EditorTools.Greybox
             GreyboxKit.Box("Table_B", root, new Vector3(cx + 7.5f, 0.45f, 0f), new Vector3(3f, 0.9f, 1.6f), GreyboxKit.Wood);
             GreyboxKit.Box("Table_C", root, new Vector3(cx + 7.5f, 0.45f, 4f), new Vector3(3f, 0.9f, 1.6f), GreyboxKit.Wood);
 
-            for (int i = 0; i < 5; i++)
-                GreyboxKit.Box($"SearchSpot_{i}", root,
-                    new Vector3(cx - 9.2f + i * 4.4f, 0.35f, 8.6f),
-                    new Vector3(1.1f, 0.7f, 1.1f), GreyboxKit.Metal);
+            BuildArchiveContainers(root, cx);
 
             GreyboxKit.SignText("Sign", root, new Vector3(x1 - 0.4f, 4.2f, 0f), Quaternion.Euler(0f, 90f, 0f), "ARCHIVE", 1f);
+        }
+
+        /// <summary>
+        /// Ten searchable containers along the Archive's north and south walls, clear
+        /// of the shelf aisles so two players can work without blocking each other.
+        ///
+        /// Search times vary by kind, which is the first real pacing lever: a drawer
+        /// is a cheap glance, a shelf section is a commitment you can be interrupted
+        /// during. ContainerIndex is stable and set here, because placement keys off
+        /// it — renumbering these would move the evidence.
+        /// </summary>
+        private static void BuildArchiveContainers(Transform parent, float cx)
+        {
+            var root = new GameObject("ArchiveContainers").transform;
+            root.SetParent(parent, false);
+
+            // kind, search seconds, size
+            var kinds = new (string Kind, float Seconds, Vector3 Size, Material Mat)[]
+            {
+                ("Desk Drawer",    1.5f, new Vector3(1.0f, 0.8f, 0.7f),  GreyboxKit.Wood),
+                ("Records Box",    2.5f, new Vector3(0.9f, 0.7f, 0.9f),  GreyboxKit.Metal),
+                ("Filing Cabinet", 3.0f, new Vector3(0.9f, 1.6f, 0.7f),  GreyboxKit.Metal),
+                ("Shelf Section",  4.0f, new Vector3(1.4f, 2.2f, 0.6f),  GreyboxKit.Wood),
+            };
+
+            // Five along the north wall, five along the south, facing into the room.
+            for (int i = 0; i < 10; i++)
+            {
+                bool north = i < 5;
+                int column = i % 5;
+
+                float x = cx - 8f + column * 4f;
+                float z = north ? 8.6f : -8.6f;
+
+                var kind = kinds[i % kinds.Length];
+                var go = GreyboxKit.Box($"Container_{i:00}_{kind.Kind.Replace(" ", "")}", root,
+                    new Vector3(x, kind.Size.y * 0.5f, z), kind.Size, kind.Mat);
+
+                go.AddComponent<Unity.Netcode.NetworkObject>();
+
+                var container = go.AddComponent<CaseClosed.Game.Archive.ArchiveContainer>();
+                container.ContainerIndex = i;
+                container.ContainerKind = kind.Kind;
+                container.Prompt = $"Search {kind.Kind}";
+                container.HoldDuration = kind.Seconds;
+                container.MaxDistance = 3f;
+                container.RequiresLineOfSight = true;
+
+                // Into the room, away from the wall behind. The north row faces -Z,
+                // the south row +Z. Without this, discovered evidence spawns inside
+                // the wall and cannot be reached.
+                container.RevealDirection = north ? Vector3.back : Vector3.forward;
+            }
         }
 
         /// <summary>
@@ -340,6 +390,13 @@ namespace CaseClosed.EditorTools.Greybox
             var nmGo = new GameObject("NetworkManager");
             var nm = nmGo.AddComponent<NetworkManager>();
             var transport = nmGo.AddComponent<UnityTransport>();
+
+            // NetworkConfig is normally created by NGO's field initialiser, but a
+            // component added in edit mode does not always have it yet — it comes
+            // back null when the builder runs straight after heavy asset work.
+            // Cheaper to guarantee it than to depend on the timing.
+            if (nm.NetworkConfig == null) nm.NetworkConfig = new NetworkConfig();
+
             nm.NetworkConfig.NetworkTransport = transport;
             nm.NetworkConfig.PlayerPrefab = prefab;
             nm.NetworkConfig.ConnectionApproval = false;
@@ -366,6 +423,172 @@ namespace CaseClosed.EditorTools.Greybox
             hudGo.AddComponent<PlayerDebugHud>();
             hudGo.AddComponent<VoiceHud>();
             hudGo.AddComponent<GreyboxDebugHud>();
+            hudGo.AddComponent<CaseClosed.Game.Cases.CaseDebugPanel>();
+
+            // Shows every player their own seat. Without this, roles were dealt
+            // correctly and were invisible from inside the running game.
+            hudGo.AddComponent<CaseClosed.Game.Cases.Roles.PlayerRoleHud>();
+
+            // The briefing card. Blocks movement until the player presses Ready.
+            hudGo.AddComponent<CaseClosed.Game.Match.BriefingScreen>();
+
+            // Crosshair, "[E] ..." prompt, hold bar and refusal messages.
+            hudGo.AddComponent<CaseClosed.Game.Interaction.InteractionPromptUI>();
+
+            // "EVIDENCE FOUND" card and the empty-search line.
+            hudGo.AddComponent<CaseClosed.Game.Archive.EvidenceDiscoveryUI>();
+
+            // Carry indicator, drop key, and the Tab inspect list.
+            hudGo.AddComponent<CaseClosed.Game.Archive.EvidenceCarryHud>();
+
+            BuildCaseSystems();
+        }
+
+        /// <summary>
+        /// Case systems, split across two objects on purpose.
+        ///
+        /// ActiveCaseManager holds the hidden truth and is NOT networked — it has no
+        /// NetworkObject, so nothing about it can be replicated even by accident.
+        /// CaseNetworkController is the networked half and can only see the filtered
+        /// views. Keeping them apart is what makes the secrecy boundary physical
+        /// rather than a rule someone has to remember.
+        /// </summary>
+        private static void BuildCaseSystems()
+        {
+            var vault = new GameObject("ActiveCaseManager");
+            vault.AddComponent<CaseClosed.Game.Cases.ActiveCaseManager>();
+
+            var netGo = new GameObject("CaseNetworkController");
+            netGo.AddComponent<Unity.Netcode.NetworkObject>();
+            netGo.AddComponent<CaseClosed.Game.Cases.CaseNetworkController>();
+
+            // The roster shares this NetworkObject rather than spawning a second one.
+            // Roles are public (everyone can see who prosecutes); guilt is not, and
+            // travels on a different channel entirely.
+            netGo.AddComponent<CaseClosed.Game.Cases.Roles.PlayerRoster>();
+
+            // Match phases and readiness. Separate object so the session state
+            // machine is not tangled with the secrecy boundary.
+            var matchGo = new GameObject("MatchFlowController");
+            matchGo.AddComponent<Unity.Netcode.NetworkObject>();
+            var flow = matchGo.AddComponent<CaseClosed.Game.Match.MatchFlowController>();
+            flow.RequiredPlayers = 4;
+            flow.AllowPartialTable = true;   // so 2-instance testing still advances
+
+            var interactionGo = new GameObject("InteractionNetworkController");
+            interactionGo.AddComponent<Unity.Netcode.NetworkObject>();
+            interactionGo.AddComponent<CaseClosed.Game.Interaction.InteractionNetworkController>();
+
+            // Holds the Archive answer key. Server-side only — nothing it knows is
+            // replicated, which is what keeps container contents secret.
+            var archiveGo = new GameObject("ArchiveDirector");
+            archiveGo.AddComponent<Unity.Netcode.NetworkObject>();
+            archiveGo.AddComponent<CaseClosed.Game.Archive.ArchiveDirector>();
+
+            var custodyGo = new GameObject("EvidenceCustodyDirector");
+            custodyGo.AddComponent<Unity.Netcode.NetworkObject>();
+            custodyGo.AddComponent<CaseClosed.Game.Archive.EvidenceCustodyDirector>();
+
+            BuildEvidenceBodyPool();
+        }
+
+        /// <summary>
+        /// A pool of physical evidence bodies, parked out of sight until a search
+        /// reveals one.
+        ///
+        /// Pooled scene objects rather than runtime spawning: no prefab registration,
+        /// and the number of physical items a case can yield is small and known
+        /// (currently two). Six gives comfortable headroom.
+        /// </summary>
+        private static void BuildEvidenceBodyPool()
+        {
+            var root = new GameObject("EvidenceBodies").transform;
+
+            for (int i = 0; i < 6; i++)
+            {
+                // A manila folder: flat, tan, obviously carryable, obviously not art.
+                var body = GreyboxKit.Box($"EvidenceBody_{i:00}", root,
+                    new Vector3(0f, -50f, 0f),               // parked below the world
+                    new Vector3(0.32f, 0.05f, 0.42f), GreyboxKit.Bench);
+
+                body.AddComponent<Unity.Netcode.NetworkObject>();
+
+                var evidence = body.AddComponent<CaseClosed.Game.Archive.PhysicalEvidence>();
+                evidence.Prompt = "Pick Up Evidence";
+                evidence.HoldDuration = 0f;      // instant: picking up paper is not a task
+                evidence.MaxDistance = 2.5f;
+                evidence.RequiresLineOfSight = true;
+            }
+
+            BuildInteractionTestArea();
+        }
+
+        /// <summary>
+        /// Four test objects in the south-west corner of the atrium, near spawn.
+        ///
+        /// Each exercises a different part of the contract: instant, replicated
+        /// visible state, exclusive hold, and role restriction. They are scaffolding
+        /// for the interaction system, not game content.
+        /// </summary>
+        private static void BuildInteractionTestArea()
+        {
+            var root = new GameObject("InteractionTestArea").transform;
+
+            // OUTSIDE the courthouse, on its own slab, reached through the atrium's
+            // south entrance. Inside, the objects sat against a wall: you could not
+            // get far enough back to aim at them, and the wall kept eating the
+            // line-of-sight ray. Out here there is nothing to interfere.
+            const float PadZ = -32f;
+
+            // Walkway from the south entrance out to the pad.
+            GreyboxKit.Slab("Walkway", root, -3f, -24f, 3f, -AtriumHalfZ, 0f, GreyboxKit.Floor);
+
+            // The pad itself, with a low lip so you can see where it ends.
+            GreyboxKit.Slab("Pad", root, -12f, PadZ - 8f, 12f, -24f, 0f, GreyboxKit.Floor);
+            GreyboxKit.Box("Lip_W", root, new Vector3(-12f, 0.25f, PadZ - 2f), new Vector3(0.4f, 0.5f, 16f), GreyboxKit.Accent);
+            GreyboxKit.Box("Lip_E", root, new Vector3(12f, 0.25f, PadZ - 2f), new Vector3(0.4f, 0.5f, 16f), GreyboxKit.Accent);
+            GreyboxKit.Box("Lip_S", root, new Vector3(0f, 0.25f, PadZ - 8f), new Vector3(24f, 0.5f, 0.4f), GreyboxKit.Accent);
+
+            GreyboxKit.SignText("Sign_Test", root, new Vector3(0f, 3.2f, -25f),
+                Quaternion.identity, "INTERACTION TEST", 0.9f);
+
+            // Objects stand in a row facing the walkway, well clear of any wall, so
+            // you can back off and aim at each one.
+            float z = PadZ;
+
+            // 1. Instant, server-owned counter.
+            var button = GreyboxKit.Box("TestButton", root, new Vector3(-7.5f, 1.1f, z),
+                new Vector3(0.6f, 0.6f, 0.4f), GreyboxKit.Accent);
+            button.AddComponent<Unity.Netcode.NetworkObject>();
+            var buttonScript = button.AddComponent<CaseClosed.Game.Interaction.Test.TestButton>();
+            buttonScript.Prompt = "Press Button";
+            buttonScript.MaxDistance = 3f;
+
+            // 2. Instant toggle, visible to everyone.
+            var door = GreyboxKit.Box("TestDoor", root, new Vector3(-2.5f, 1.5f, z),
+                new Vector3(1.4f, 3f, 0.25f), GreyboxKit.Wood);
+            door.AddComponent<Unity.Netcode.NetworkObject>();
+            var doorScript = door.AddComponent<CaseClosed.Game.Interaction.Test.TestDoor>();
+            doorScript.Prompt = "Open Door";
+            doorScript.MaxDistance = 3.5f;
+
+            // 3. Hold, exclusive — the shape every Archive shelf will take.
+            var cabinet = GreyboxKit.Box("TestCabinet", root, new Vector3(2.5f, 1f, z),
+                new Vector3(1.2f, 2f, 0.8f), GreyboxKit.Metal);
+            cabinet.AddComponent<Unity.Netcode.NetworkObject>();
+            var cabinetScript = cabinet.AddComponent<CaseClosed.Game.Interaction.Test.TestCabinet>();
+            cabinetScript.Prompt = "Search Cabinet";
+            cabinetScript.HoldDuration = 2.5f;
+            cabinetScript.MaxDistance = 3f;
+
+            // 4. Prosecution only — the server refuses anyone else.
+            var restricted = GreyboxKit.Box("TestRestricted", root, new Vector3(7.5f, 1.1f, z),
+                new Vector3(0.9f, 0.9f, 0.9f), GreyboxKit.Sign);
+            restricted.AddComponent<Unity.Netcode.NetworkObject>();
+            var restrictedScript = restricted.AddComponent<CaseClosed.Game.Interaction.Test.TestRestrictedObject>();
+            restrictedScript.Prompt = "Use Terminal";
+            restrictedScript.MaxDistance = 3f;
+            restrictedScript.RequiredTeam = CaseClosed.Game.Cases.Roles.PlayerTeam.Prosecution;
         }
     }
 }

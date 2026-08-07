@@ -1,0 +1,690 @@
+<meta charset="utf-8">
+<title>CASE CLOSED — Build Log</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Calibri, sans-serif;
+    font-size: 10.2pt; line-height: 1.5; color: #1a1a1a; margin: 0;
+  }
+  h1 { font-size: 26pt; margin: 0 0 2px; letter-spacing: -0.5px; }
+  h1 + .sub { color: #666; font-size: 11pt; margin-bottom: 26px; }
+  h2 {
+    font-size: 15pt; margin: 26px 0 8px; padding-bottom: 5px;
+    border-bottom: 2px solid #1a1a1a; page-break-after: avoid;
+  }
+  h3 { font-size: 11.6pt; margin: 16px 0 5px; page-break-after: avoid; }
+  h4 { font-size: 10.4pt; margin: 12px 0 4px; color: #333; page-break-after: avoid; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0 6px 20px; padding: 0; }
+  li { margin: 3px 0; }
+  code {
+    font-family: Consolas, monospace; font-size: 9pt;
+    background: #f2f2f4; padding: 1px 4px; border-radius: 3px;
+  }
+  pre {
+    font-family: Consolas, monospace; font-size: 8.4pt; line-height: 1.4;
+    background: #f7f7f9; border: 1px solid #e0e0e4; border-left: 3px solid #888;
+    padding: 8px 10px; margin: 8px 0; white-space: pre-wrap;
+    page-break-inside: avoid; border-radius: 3px;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9.2pt; }
+  th, td { border: 1px solid #d5d5da; padding: 4px 7px; text-align: left; vertical-align: top; }
+  th { background: #eeeef1; font-weight: 600; }
+  .why {
+    background: #fdfaf0; border-left: 3px solid #c8a020;
+    padding: 7px 11px; margin: 8px 0; page-break-inside: avoid;
+  }
+  .bug {
+    background: #fdf3f2; border-left: 3px solid #c0392b;
+    padding: 7px 11px; margin: 8px 0; page-break-inside: avoid;
+  }
+  .ok { color: #1d7a35; font-weight: 600; }
+  .no { color: #b8332a; font-weight: 600; }
+  .ms {
+    background: #1a1a1a; color: #fff; padding: 3px 9px;
+    font-size: 9pt; border-radius: 3px; display: inline-block; margin-bottom: 4px;
+  }
+  .page-break { page-break-before: always; }
+  .toc { background: #f7f7f9; border: 1px solid #e0e0e4; padding: 10px 16px; margin: 14px 0 6px; }
+  .toc ol { margin-left: 18px; }
+  .toc li { margin: 2px 0; }
+  .muted { color: #666; font-size: 9pt; }
+  .kv { font-size: 9.4pt; }
+  .kv td { border: none; padding: 2px 8px 2px 0; }
+</style>
+
+<h1>CASE CLOSED</h1>
+<div class="sub">Unity build log — architecture, decisions, and the bugs that shaped them<br>
+<span class="muted">Repository: github.com/Brawly0/COURT &nbsp;·&nbsp; Unity 6000.5.6f1 &nbsp;·&nbsp; Netcode for GameObjects 2.13.1</span></div>
+
+<div class="toc">
+<strong>Contents</strong>
+<ol>
+  <li>What the game is</li>
+  <li>Tooling — the Unity/Claude bridge</li>
+  <li>Milestone 1 — Third-person player prototype</li>
+  <li>Milestone 2 — Multiplayer foundation</li>
+  <li>Milestone 3 — Proximity voice chat</li>
+  <li>Milestone 4 — Voice occlusion + secrecy fix</li>
+  <li>Milestone 5 — Greybox courthouse</li>
+  <li>Milestone 6 — Case generator integration</li>
+  <li>Milestone 7 — Role assignment</li>
+  <li>Milestone 8 — Briefings and ready flow</li>
+  <li>Milestone 9 — Networked interaction system</li>
+  <li>Milestone 10 — Archive search and evidence discovery</li>
+  <li>Milestone 11 — Physical evidence custody</li>
+  <li>Architecture summary</li>
+  <li>Every bug found, and what it taught</li>
+  <li>Known limitations</li>
+  <li>How to run and test</li>
+  <li>Recommended next steps</li>
+</ol>
+</div>
+
+<h2>1. What the game is</h2>
+
+<p><strong>CASE CLOSED</strong> is a 4–8 player courtroom-detective game. A procedurally generated
+crime, a 15-minute investigation, an 8-minute trial before a deterministic AI judge, and a truth
+reveal at the end.</p>
+
+<p>The defining constraint, which drives nearly every decision in this log: <strong>the game is
+about asymmetric knowledge.</strong> The defendant knows whether they did it. Nobody else does.
+Players reconstruct the truth by physically moving around a building, searching for records, and
+talking to each other. That means secrecy is not a feature bolted on later — it is the thing the
+architecture has to protect at every layer.</p>
+
+<h3>Pre-existing work (not built in this log)</h3>
+<table>
+  <tr><th>Component</th><th>State</th></tr>
+  <tr><td><code>src/CaseClosed.TruthEngine</code></td><td>Pure C# case generator. netstandard2.1, zero dependencies, own PCG32 RNG. 18 tests.</td></tr>
+  <tr><td><code>Assets/Plugins/CaseClosed.TruthEngine.dll</code></td><td>Compiled engine, already dropped into Unity.</td></tr>
+  <tr><td><code>docs/MAP_DESIGN.md</code></td><td>Level design doc defining the run structure and roles.</td></tr>
+</table>
+
+<div class="why"><strong>Why this matters:</strong> the generator answers <em>"what happened?"</em>
+Unity answers <em>"where can players find out?"</em> These were kept strictly separate throughout.
+The generator was never modified.</div>
+
+<h2>2. Tooling — the Unity/Claude bridge</h2>
+
+<p>Work began by connecting Claude Code to the Unity Editor so changes could be made and verified
+without manual round-trips.</p>
+
+<p>Two bridges ended up available: Unity's own local relay (<code>unity</code> MCP), and the
+third-party <strong>AI Game Developer</strong> plugin (IvanMurzak/Unity-MCP) from a YouTube tutorial.</p>
+
+<div class="why"><strong>Decision:</strong> the plugin defaulted to <strong>Cloud</strong> mode,
+routing scene data through <code>ai-game.dev</code> and requiring an OAuth login. Switched it to
+<strong>Custom</strong> mode, which runs <code>gamedev-mcp-server.exe</code> on localhost:24718 —
+no third-party routing, no account. The plugin's config had to be flipped on disk and a domain
+reload forced before it took effect.</div>
+
+<h2 class="page-break">3. Milestone 1 — Third-person player prototype</h2>
+<div class="ms">GOAL: spawn a character, walk, run, sprint, jump, camera follows, animations work</div>
+
+<h3>What existed, and what was left alone</h3>
+<p>The project already had <code>FirstPersonController.cs</code> wired into a networked player
+prefab, with the old courthouse calibrated against its speeds. <strong>It was not modified.</strong>
+The new third-person system was built alongside it.</p>
+
+<h3>Components created</h3>
+<table>
+  <tr><th>File</th><th>Responsibility</th></tr>
+  <tr><td><code>PlayerInputReader</code></td><td>The <em>only</em> script that reads a keyboard or mouse.</td></tr>
+  <tr><td><code>PlayerMovement</code></td><td>Speed, gravity, slopes, jump, ground detection, turning.</td></tr>
+  <tr><td><code>PlayerCameraRig</code></td><td>Third-person orbit camera with collision.</td></tr>
+  <tr><td><code>PlayerAnimatorDriver</code></td><td>Reads movement, writes Animator parameters.</td></tr>
+  <tr><td><code>PlayerDebugHud</code></td><td>F1 overlay: speed, grounded, state.</td></tr>
+</table>
+
+<div class="why"><strong>Why input is isolated:</strong> when multiplayer arrives, a remote player's
+inputs get written into the same fields from the network instead of from a keyboard, and
+<code>PlayerMovement</code> never has to change. This one decision made Milestone 2 straightforward.</div>
+
+<h3>Character and animation</h3>
+<p>A blocky low-poly human built entirely from Unity primitives in an editor script — head, torso,
+arms, legs, hands, feet, simple face, suit. Seven animation clips (<code>Idle</code>, <code>Walk</code>,
+<code>Run</code>, <code>Sprint</code>, <code>Jump</code>, <code>Fall</code>, <code>Land</code>)
+generated procedurally as keyframed limb rotations, driven by a blend tree on measured velocity.
+No imported art.</p>
+
+<h3>Measured results</h3>
+<pre>walk / run / sprint : 1.90 / 4.30 / 7.00 m/s
+jump height         : 1.38 m against a 1.40 m target
+ramps               : 25 deg walkable, 60 deg slides
+leg swing (running) : -41.9 deg .. +42.0 deg   (clip authored at 42)
+arm swing           : -37.9 deg .. +38.0 deg   (clip authored at 38)
+hip bob             : 0.040 m                  (clip authored at 0.040)</pre>
+
+<h2>4. Milestone 2 — Multiplayer foundation</h2>
+<div class="ms">GOAL: two players connect, see each other move, jump, animate; handle disconnects</div>
+
+<h3>Technology</h3>
+<p><strong>Netcode for GameObjects 2.13.1</strong>, already in the project. Owner-authoritative:
+each player simulates their own character and broadcasts the result.</p>
+
+<h3>What runs where</h3>
+<table>
+  <tr><th>Machine</th><th>Runs</th></tr>
+  <tr><td>Host</td><td>Server + a player. Relays traffic, owns spawning.</td></tr>
+  <tr><td>Your own character</td><td>Input, movement, camera, animation.</td></tr>
+  <tr><td>Someone else's character</td><td>Nothing but presentation — a puppet moved by network data.</td></tr>
+</table>
+
+<div class="bug"><strong>Reused hard-won knowledge:</strong> a comment in the project's existing
+<code>NetPlayer.cs</code> read <em>"a live CharacterController stomps external transform writes,
+freezing remote copies at spawn."</em> That was from an earlier "Fix frozen remote players" commit.
+Remote characters therefore get their CharacterController <strong>disabled</strong>.</div>
+
+<h3>Animation replication</h3>
+<p>Animations are <strong>not</strong> sent as clips. Four small values cross the wire — speed,
+vertical speed, grounded, movement state — and every machine runs the same Animator Controller off
+them.</p>
+
+<div class="why"><strong>Why:</strong> a few bytes per tick instead of a stream of animation state,
+and remote characters blend Idle→Walk→Run→Sprint using the identical state machine, so they cannot
+drift out of sync with what the body is doing.</div>
+
+<h3>Verified with two real processes</h3>
+<pre>[Roles] host and client each hold 2 players; each owns exactly one
+host tracked client z -3.1 -> -34.2 ; client tracked host z 5.3 -> 36.0
+remote states seen: Walk, Run, Sprint, Jump, Fall, Land
+remote leg swing 111.4 deg (Sprint clip authored at 56 => 112)
+disconnect: "client 1 left", host continued; 0 exceptions</pre>
+
+<h2 class="page-break">5. Milestone 3 — Proximity voice chat</h2>
+<div class="ms">GOAL: hear nearby players, quieter with distance, silent beyond range</div>
+
+<h3>Technology decision</h3>
+<p>Built on <strong>NGO itself</strong>, not Vivox.</p>
+
+<div class="why"><strong>Why not Vivox (the usual answer):</strong> it requires a Unity Gaming
+Services project, dashboard linking and credentials — account setup that would have blocked the
+milestone entirely, plus a second network stack alongside NGO. The cost of not using it is real
+and was stated up front: no echo cancellation, no noise suppression, no AGC.</div>
+
+<h3>The audio path</h3>
+<pre>Microphone -> 16 kHz mono -> G.711 mu-law -> 20 ms frames (320 bytes)
+   -> ServerRpc -> host measures distance per listener
+   -> ClientRpc to those in range only
+   -> jitter buffer -> streaming AudioClip -> AudioSource ON THE SPEAKER'S BODY</pre>
+
+<table class="kv">
+  <tr><td>Codec measured SNR</td><td>36.6 dB (telephone quality is ~38 dB)</td></tr>
+  <tr><td>Compression</td><td>4:1 versus float PCM</td></tr>
+  <tr><td>Bitrate</td><td>~128 kbit/s per active speaker</td></tr>
+</table>
+
+<div class="why"><strong>Two-layer attenuation.</strong> The <em>server</em> drops frames for
+listeners beyond max range — that is the hard cutoff, and means a modified client cannot listen in
+from across the map because those packets were never sent. Within range, the AudioSource sits on
+the speaker's character at <code>spatialBlend = 1</code>, so distance and direction come free.</div>
+
+<h3>Verified across processes</h3>
+<pre>dist= 8.2m  audioArriving=True   level=0.248
+dist=14.8m  audioArriving=True   level=0.250
+dist=28.2m  audioArriving=False  level=0.000
+dist=72.2m  audioArriving=False  level=0.000</pre>
+
+<h2>6. Milestone 4 — Voice occlusion + secrecy fix</h2>
+<div class="ms">GOAL: walls should block voice</div>
+
+<p>Distance alone meant a player two metres away through a sealed courtroom wall was as loud as one
+standing next to you. For COURT that is worse than wrong — <em>"can they hear me from in there"</em>
+is the actual game.</p>
+
+<h3>Occlusion, two layers again</h3>
+<ul>
+  <li><strong>Server (authoritative):</strong> walls shrink how far a voice carries. A modified
+      client cannot hear through a wall, because those packets are never sent.</li>
+  <li><strong>Client (presentation):</strong> volume drop <em>plus</em> a low-pass filter.</li>
+</ul>
+
+<div class="why"><strong>Why the low-pass matters:</strong> volume alone just sounds far away.
+Losing the high frequencies is what reads as "through a door". Interpolated in log space, because
+perceived brightness is logarithmic, and smoothed over 0.18 s so doorways fade rather than pop.</div>
+
+<pre>open floor, clear line        blockers=0   occlusion=0.00   carries 21.0 m
+through one corridor wall     blockers=1   occlusion=0.33   carries 16.5 m
+through both corridor walls   blockers=2   occlusion=0.67   carries 11.9 m</pre>
+
+<p>One wall <em>muffles</em> rather than silences — deliberately, since overhearing a muffled
+argument through a courtroom door is a mechanic worth having.</p>
+
+<div class="bug"><strong>Leak found and closed.</strong> <code>IsSpeaking</code> was a
+NetworkVariable readable by everyone, so a client knew a player across the map was talking even
+though the server had correctly refused them the audio. In a game built on eavesdropping that is
+exactly the information you must not leak. It is now <strong>derived from audio actually
+received</strong> — zero bandwidth, and it cannot lie.
+<br><br>Before: <code>dist=72.2m speaking=True</code> &nbsp;→&nbsp; After: <code>dist=72.1m speaking=False</code></div>
+
+<h2 class="page-break">7. Milestone 5 — Greybox courthouse</h2>
+<div class="ms">GOAL: Archive, Witness Lounge, Courtroom around a central Atrium</div>
+
+<p>The previous v2.3 courthouse was removed at the user's request (all recoverable from commit
+<code>c272023</code>), along with the first-person player and the scripts welded to it.</p>
+
+<h3>The plan is a hub and three spokes</h3>
+<pre>                    COURTROOM
+                        |            (40 m from atrium centre)
+      ARCHIVE ------ ATRIUM ------ WITNESS LOUNGE
+    (40 m west)                      (40 m east)</pre>
+
+<div class="why"><strong>Every room is 40 m from the middle</strong> — about 9.3 s at the
+controller's 4.3 m/s run speed, inside the 8–12 s target. Any two rooms are 80 m apart via the
+atrium (~18.6 s), under the 20 s ceiling.
+<br><br><strong>Everything routes through the atrium on purpose.</strong> There are no shortcuts
+between wings, so crossing the building means passing through the one space where everyone else is.
+That is where chance encounters and overheard conversations happen. A ring corridor would be kinder
+to navigate and would kill the game.</div>
+
+<table>
+  <tr><th>Room</th><th>Contents and intent</th></tr>
+  <tr><td>Archive</td><td>Shelf aisles chop it into lanes, so two players searching can be metres apart and neither see nor clearly hear each other.</td></tr>
+  <tr><td>Witness Lounge</td><td>Open waiting area plus an interview nook behind a partition — the first place you can hold a conversation others cannot quite hear.</td></tr>
+  <tr><td>Courtroom</td><td>Judge dais, witness stand, opposed counsel tables, bar, gallery benches. Positions only, no trial logic.</td></tr>
+  <tr><td>Atrium</td><td>Pillars break sightlines; reception desk as a landmark.</td></tr>
+</table>
+
+<p><code>RoomVolume</code> + <code>GreyboxDebugHud</code> (F3) record real travel times during play
+rather than calculating them from distances.</p>
+
+<h2>8. Milestone 6 — Case generator integration</h2>
+<div class="ms">GOAL: host generates a case, owns the truth, clients get only what they may know</div>
+
+<div class="bug"><strong>Correction made during this milestone.</strong> The generator was initially
+wired in as a local package. That was wrong — a current, git-tracked
+<code>CaseClosed.TruthEngine.dll</code> already sat in <code>Assets/Plugins</code>. The compiler
+caught it (<code>CS1704: assembly already imported</code>); the package was reverted and the
+existing DLL used.</div>
+
+<h3>The four data layers</h3>
+<table>
+  <tr><th>Type</th><th>Holds</th><th>Who sees it</th></tr>
+  <tr><td><code>CompleteCaseTruth</code></td><td>Everything: perpetrator, occupancy, corruptions, proof chain</td><td><strong>Host only</strong></td></tr>
+  <tr><td><code>PublicCaseInfo</code></td><td>Title, crime, briefing, cast, duration</td><td>Everyone</td></tr>
+  <tr><td><code>PlayerCaseView</code></td><td>Role, private briefing, permitted facts, guilt (defendant only)</td><td>One player</td></tr>
+  <tr><td><code>DeveloperCaseDebugView</code></td><td>Everything, formatted</td><td>Host, dev builds, behind F2</td></tr>
+</table>
+
+<div class="why"><strong>Protection is structural, not procedural.</strong>
+<code>CompleteCaseTruth</code> is a managed class that does <em>not</em> implement
+<code>INetworkSerializable</code> and contains dictionaries and jagged arrays — so
+<code>SomethingClientRpc(truth)</code> is a <strong>compile error</strong>.
+<code>ActiveCaseManager</code> has no <code>NetworkObject</code>, so it cannot replicate even by
+accident. There is no permission to misconfigure.</div>
+
+<p>The guilt bit is sent as <code>false</code> to non-defendants <em>regardless of the truth</em>,
+so the packet carries no signal either way.</p>
+
+<div class="bug"><strong>Bug caught by the audit:</strong> <code>FixedString128Bytes</code> is sized
+in <strong>bytes</strong>, but the truncation helper counted <strong>characters</strong> — and the
+generator's prose contains em-dashes (3 UTF-8 bytes each). A 124-character string could be 130 bytes
+and throw. Fixed to a byte budget.</div>
+
+<h2 class="page-break">9. Milestone 7 — Role assignment</h2>
+<div class="ms">GOAL: server-authoritative roles, exactly one Defendant, safe late join</div>
+
+<p>Roles came from the project's own <code>docs/MAP_DESIGN.md</code> rather than being invented:</p>
+
+<pre>LOBBY      Roles dealt. Defendant learns the truth, alone, on his card.
+BRIEFING   Both teams enter their own office. Prosecution gets 1 forensic
+           fact. Defense gets nothing and has to ask their client.</pre>
+
+<table>
+  <tr><th>Role</th><th>Team</th><th>Unique?</th></tr>
+  <tr><td>Defendant</td><td>Defense</td><td>Yes — dealt once per case, never re-dealt</td></tr>
+  <tr><td>Defense Attorney</td><td>Defense</td><td>Yes</td></tr>
+  <tr><td>Prosecutor</td><td>Prosecution</td><td>Yes</td></tr>
+  <tr><td>Investigator</td><td>Prosecution</td><td>No — repeatable seat</td></tr>
+</table>
+
+<p>The judge is the deterministic AI, never a player.</p>
+
+<div class="why"><strong>Roles are public; guilt is not.</strong> In a courtroom you can see who is
+prosecuting. Hiding it would buy no secrecy and would make name tags and office doors impossible.
+Guilt travels on a separate channel to one player. Keeping them apart stops a future feature
+widening the roster and leaking the mystery.</div>
+
+<div class="why"><strong>A departed Defendant is not replaced.</strong> Promoting someone mid-case
+would hand a stranger the answer to the mystery. The seat goes vacant,
+<code>DefendantMissing</code> flips true, and the trial system decides between in-absentia (which
+the design doc already names) and a redeal.</div>
+
+<p>Dealt from the case seed using the project's own PCG32, with client ids <strong>sorted before
+shuffling</strong> — NGO reports connections in arbitrary order, so without sorting "deterministic"
+would be a lie.</p>
+
+<h2>10. Milestone 8 — Briefings and ready flow</h2>
+<div class="ms">GOAL: every player gets role, team, public info, private briefing, and a Ready button</div>
+
+<p>A match-level state machine kept separate from the case lifecycle:</p>
+<pre>LobbyReady -> AssigningRoles -> GeneratingCase -> DistributingBriefings
+           -> WaitingForPlayers -> PreInvestigationReady</pre>
+
+<div class="why"><strong>Why separate:</strong> <code>CaseLifecycleState</code> answers "does a
+generated case exist and has it been distributed" — a data question. <code>MatchPhase</code> answers
+"what are the humans doing" — a session question. Merging them would mean regenerating a case
+rewinds the lobby.</div>
+
+<h3>Readiness</h3>
+<p><code>SubmitReadyServerRpc</code> takes <strong>no client id</strong> — NGO supplies the sender,
+so marking another player ready is <em>unrepresentable</em> rather than merely validated. A
+server-side <code>HashSet</code> makes duplicates idempotent; disconnect withdraws readiness.</p>
+
+<div class="bug"><strong>A real leak, found by strengthening a weak test.</strong> The first
+"hides the perpetrator" check ran on a <em>guilty</em> case — where the perpetrator <strong>is</strong>
+the defendant, so it passed vacuously. Re-running against an <em>innocent</em> case exposed that the
+Prosecutor's opening fact was <code>ProofFacts[0]</code> — and the proof chain is precisely what
+implicates the real culprit. The Prosecutor was being handed the answer at the briefing screen.
+<br><br><strong>Fix:</strong> sourced from the defendant's <strong>baggage</strong> instead — true,
+discoverable, about the defendant, and never naming the culprit. Better design, not just a patch:
+baggage is <em>why the state charged them</em>.</div>
+
+<h3>Verified with four processes</h3>
+<pre>[Roles] Dealt — 1 Defendant, 1 Defense Attorney, 1 Prosecutor, 1 Investigator
+phase: AssigningRoles -> GeneratingCase -> DistributingBriefings
+       -> WaitingForPlayers -> PreInvestigationReady
+Ready 1/4 -> 4/4 -> ALL PLAYERS READY
+
+p0 DefenseAttorney/Defense    knowsGuilt=False guiltBit=False
+p1 Investigator/Prosecution   knowsGuilt=False guiltBit=False
+p2 Defendant/Defense          knowsGuilt=True  guiltBit=True
+p3 Prosecutor/Prosecution     knowsGuilt=False guiltBit=False
+
+truthDigest appears 11x in the host log, ZERO times in all three client logs</pre>
+
+<h2 class="page-break">11. Milestone 9 — Networked interaction system</h2>
+<div class="ms">GOAL: one reusable interaction contract for shelves, doors, terminals, the gavel</div>
+
+<h3>The contract</h3>
+<p><code>NetworkInteractable</code> is an abstract base, not an interface.</p>
+
+<div class="why"><strong>Why a base class:</strong> the parts that must not vary — distance checks,
+the exclusivity lock, hold timing, release on disconnect — live in one place and cannot be forgotten
+by an implementer. An interface would let every future object re-invent locking, and one of them
+would get it wrong.</div>
+
+<h3>What a client may say</h3>
+<p><em>"I would like to interact with object 47."</em> That is the entire vocabulary. No position,
+no result, no completion time. The server resolves the id through NGO's spawn table — a fabricated
+id resolves to nothing — measures distance itself, and runs its own clock.</p>
+
+<h3>Server validation order (cheapest first)</h3>
+<ol>
+  <li>Player exists and is spawned</li>
+  <li>Player state allows interaction</li>
+  <li>Target is available</li>
+  <li>Not locked by another player</li>
+  <li>Role/team permission</li>
+  <li>Distance (measured server-side)</li>
+  <li>Line of sight</li>
+  <li>The object's own <code>ServerValidate</code></li>
+</ol>
+
+<p>Holds tick in the <em>server's</em> <code>Update</code>, re-running full validation every frame.
+Walking away, losing sight, or the object becoming unavailable cancels without the client's
+cooperation. The client is never asked how long it held the key.</p>
+
+<div class="bug"><strong>Bug 1 — Unity script binding.</strong> Four MonoBehaviours were put in one
+file. The project already documents this in <code>ClientNetworkTransform.cs</code>: <em>"Unity's
+script-to-prefab binding breaks for MonoBehaviours defined in a file named after a different
+class."</em> Split into separate files.</div>
+
+<div class="bug"><strong>Bug 2 — stuck asset import.</strong>
+<code>InteractionNetworkController.cs</code> was valid C#, had a unique GUID, and Unity refused to
+emit its type <em>while reporting no error against the file</em>. Forced reimport and recompile did
+not help. <strong>Deleting the asset and recreating it with a fresh GUID did.</strong> Worth
+remembering: if a type "doesn't exist" with no error against its file, that is the fix.</div>
+
+<div class="bug"><strong>Bug 3 — the one that mattered: raycasting from the camera.</strong> COURT is
+<em>third-person</em>. The camera sits ~5 m behind the character (measured), and the probe range was
+3.5 m — so the ray expired about a metre behind the player's own back and could never reach anything
+in front of them. Nothing was ever targetable; pressing E did nothing.
+<br><br><strong>Fix:</strong> cast from the <strong>player's eyes, along the camera's facing</strong>.
+You reach for what you are looking at, from where you actually are. It also matches how the server
+measures distance, so the prompt cannot promise something the server then refuses.</div>
+
+<div class="bug"><strong>Bug 4 — stale prefab.</strong> The interaction detector was added to the
+prefab <em>builder</em>, but only the <em>scene</em> builder had been re-run. The prefab was stale
+and the component simply was not on the player. Diagnostic output:
+<code>detector on player : False</code>.</div>
+
+<h3>Feedback added after "I can't tell if E did anything"</h3>
+<p>The crosshair became the confirmation: grows amber when something is targetable, punches white on
+press <em>before the server answers</em>, then flashes green on success or red on refusal. Plus a
+message when no session exists — that silence was indistinguishable from a bug.</p>
+
+<h2>12. Milestone 10 — Archive search and evidence discovery</h2>
+<div class="ms">GOAL: search Archive containers, discover real generated evidence, reach FOUND</div>
+
+<h3>Key inspection finding</h3>
+<p><strong>The generator already answers the placement question.</strong> Every
+<code>EvidenceItem</code> carries a <code>FoundAt</code> string:</p>
+
+<table>
+  <tr><th>#</th><th>Item</th><th><code>FoundAt</code></th><th>Archive?</th></tr>
+  <tr><td>0</td><td><code>{CrimeObject} (recovered)</code></td><td>Impound cage, parking garage</td><td class="no">no</td></tr>
+  <tr><td>1</td><td><code>Fingerprint card: …</code></td><td>Lab tray (90s)</td><td class="no">no</td></tr>
+  <tr><td>2</td><td><code>CCTV tape: …</code></td><td>Security office console</td><td class="no">no</td></tr>
+  <tr><td>3</td><td><code>Catering schedule</code></td><td><strong>Archives, row 3</strong></td><td class="ok">yes</td></tr>
+  <tr><td>4</td><td><code>Door log: {location}</code></td><td><strong>Archives, row 5</strong></td><td class="ok">yes</td></tr>
+  <tr><td>5</td><td><code>Toxicology slip</code> (Fractured only)</td><td>Lab tray (120s)</td><td class="no">no</td></tr>
+</table>
+
+<div class="why"><strong>So categories were not invented.</strong> Unity reads the generator's own
+intent, which is what keeps fingerprints and stolen goats out of filing cabinets. Three gaps were
+<em>flagged rather than smuggled in</em>: no stable EvidenceId (derived as <code>E-003</code> from
+list position), no type enum (parsed from <code>FoundAt</code>), and only 2 Archive-suitable items
+per case.</div>
+
+<h3>Secrecy of placement</h3>
+<p>The placement map is a plain <code>Dictionary</code> on <code>ArchiveDirector</code> — never a
+NetworkVariable, never an RPC parameter. <code>ArchiveContainer</code> has <strong>no contents field
+at all</strong>; it cannot leak what it does not know, and asks the director at completion.</p>
+
+<h3>Ten containers</h3>
+<pre>Desk Drawer     1.5 s
+Records Box     2.5 s
+Filing Cabinet  3.0 s
+Shelf Section   4.0 s</pre>
+
+<p>Junk is deliberately inert — no character names, no times, no locations. It must waste a player's
+time, never mislead them into an accusation the case cannot support.</p>
+
+<p>Placement seeds from <code>caseSeed XOR salt</code> on a <strong>separate PCG32 stream</strong>
+from the case and the role deal, so reshuffling the Archive can never disturb either.</p>
+
+<h2 class="page-break">13. Milestone 11 — Physical evidence custody</h2>
+<div class="ms">GOAL: FOUND -> CARRIED -> DROPPED, and another player can pick it up</div>
+
+<h3>The central question, answered</h3>
+<p>The audit found the existing <code>FOUND</code> was <strong>knowledge</strong>, not custody — it
+recorded <em>who learned it</em> and had no notion of a physical object. So the two were split:</p>
+
+<table>
+  <tr><th></th><th>Shape</th><th>Behaviour</th></tr>
+  <tr><td><strong>Knowledge</strong></td><td>a <strong>set</strong> of readers per item</td><td>only ever grows</td></tr>
+  <tr><td><strong>Custody</strong></td><td>a <strong>single field</strong> per item</td><td>exactly one location</td></tr>
+</table>
+
+<div class="why"><strong>That asymmetry does the work.</strong> Knowledge is a set, so several people
+can know the same thing and nobody forgets when they hand a folder over. Custody is one field, so
+<strong>duplication is unrepresentable</strong> — an item cannot be in a drawer <em>and</em> a hand,
+because there is nowhere to write the second location.</div>
+
+<h3>The loop</h3>
+<p>Discovery reveals a <strong>manila folder into the world</strong>, not into an invisible
+inventory — you know what the document says before you hold it. Carry limit is one. Carrying is not
+physics: the server owns <em>who holds it</em>, and every client draws it at that player's socket.</p>
+
+<p>Drop (<code>G</code>) takes <strong>no position from the client</strong> — a client-chosen
+position could post evidence through a wall. Inspection (<code>Tab</code>) never shrinks: drop a
+folder and you still remember what it said.</p>
+
+<p><strong>On disconnect</strong> the carrier's item drops where they last stood and stays in play.
+Deleting it would silently remove a clue; returning it to its drawer would let a player hide evidence
+by pulling their network cable.</p>
+
+<div class="bug"><strong>Bug — stale bodies.</strong> Rebuilding placement reset the evidence records
+but left folders from the previous case lying on the floor, still carrying ids that had just been
+reset — world objects with no backing record. Custody is now cleared whenever knowledge is.</div>
+
+<div class="bug"><strong>Bug — evidence spawning into walls.</strong> Folders were revealed along
+<code>container.transform.forward</code>, but containers are built unrotated, so every forward is
+world +Z. The north row spawned its evidence at z=9.5, half a metre from the wall at z=10 —
+unreachable. Containers now carry an explicit <code>RevealDirection</code>.</div>
+
+<h3>Final verified run</h3>
+<pre>evidence E-003 in container 3
+after search  : knowledge=Found custody=InWorld
+folder at     : (-36.0, 1.3, 7.5)
+aimed at      : PhysicalEvidence
+after pickup  : custody=Carried carrier=0
+HUD           : True "Catering schedule (places staff by slot)"
+2nd carrier?  : refused
+after drop    : custody=InWorld
+knowledge     : kept=True readers=1
+
+VERDICT       : FOUND -> CARRIED -> DROPPED, KNOWLEDGE KEPT, NO DUPLICATION</pre>
+
+<h2>14. Architecture summary</h2>
+
+<pre>Truth            CompleteCaseTruth          host memory only, not serializable
+  |
+Knowledge        EvidenceInstance.KnownBy   a set; only ever grows
+  |
+Custody          EvidenceInstance.Custody   one field; one location
+  |
+Registered       (reserved, not built)
+  |
+Admissible       (reserved, not built)</pre>
+
+<h3>Layer responsibilities</h3>
+<table>
+  <tr><th>Layer</th><th>Files</th><th>Owns</th></tr>
+  <tr><td>Player</td><td><code>Scripts/Player/Prototype/</code></td><td>Input, movement, camera, animation</td></tr>
+  <tr><td>Multiplayer</td><td><code>.../Prototype/Net/</code></td><td>Ownership gating, transform + animation replication</td></tr>
+  <tr><td>Voice</td><td><code>.../Prototype/Voice/</code></td><td>Capture, codec, occlusion, spatial playback</td></tr>
+  <tr><td>Greybox</td><td><code>Scripts/Greybox/</code>, <code>Editor/Greybox/</code></td><td>Rooms, room volumes, travel timing</td></tr>
+  <tr><td>Case</td><td><code>Scripts/Cases/</code></td><td>Generation, secrecy boundary, view filtering</td></tr>
+  <tr><td>Roles</td><td><code>Scripts/Cases/Roles/</code></td><td>Deal, roster, teams</td></tr>
+  <tr><td>Match</td><td><code>Scripts/Match/</code></td><td>Phases, briefings, readiness</td></tr>
+  <tr><td>Interaction</td><td><code>Scripts/Interaction/</code></td><td>The one interaction contract</td></tr>
+  <tr><td>Archive</td><td><code>Scripts/Archive/</code></td><td>Placement, search, discovery, custody</td></tr>
+</table>
+
+<h3>Automated audits (all passing)</h3>
+<table>
+  <tr><th>Audit</th><th>Checks</th><th>Menu</th></tr>
+  <tr><td>Case integration</td><td>41</td><td>Case Closed &gt; Cases &gt; Run Integration Audit</td></tr>
+  <tr><td>Interaction</td><td>21</td><td>Case Closed &gt; Interaction &gt; Run Audit</td></tr>
+  <tr><td>Archive + custody</td><td>36</td><td>Case Closed &gt; Archive &gt; Run Audit</td></tr>
+</table>
+
+<div class="why"><strong>Why many checks are structural (reflection) rather than behavioural:</strong>
+"a client cannot impersonate another player" is a property of an RPC signature, not of any particular
+playthrough. Asserting it against the shape of the code catches a regression the moment someone adds
+a convenient <code>clientId</code> parameter — which no amount of play-testing reliably would.</div>
+
+<h2 class="page-break">15. Every bug found, and what it taught</h2>
+
+<table>
+  <tr><th>#</th><th>Bug</th><th>Lesson</th></tr>
+  <tr><td>1</td><td>Animator controller assigned to the scene instance, never the prefab — so nothing animated after switching to network spawning</td><td>Verify the <em>observable effect</em> (limbs moving), not the proxy (state names)</td></tr>
+  <tr><td>2</td><td><code>PlayerCameraRig.Start()</code> dereferenced a null Target once the player spawned later</td><td>Spawn order changes what exists at Start</td></tr>
+  <tr><td>3</td><td><code>FixedString128Bytes</code> counts bytes; truncation counted characters; em-dashes are 3 bytes</td><td>Fixed-size network strings are byte budgets</td></tr>
+  <tr><td>4</td><td>Prosecutor's opening fact came from the proof chain — handing them the culprit</td><td>A test that passes vacuously is worse than no test</td></tr>
+  <tr><td>5</td><td><code>IsSpeaking</code> replicated globally, revealing distant talkers</td><td>Derive from what a player legitimately received</td></tr>
+  <tr><td>6</td><td>Four MonoBehaviours in one file broke Unity script binding</td><td>The project had already documented this exact trap</td></tr>
+  <tr><td>7</td><td>Unity refused to compile a valid file with no error; fresh GUID fixed it</td><td>Delete and recreate when a type "doesn't exist" silently</td></tr>
+  <tr><td>8</td><td>Interaction raycast originated at the camera — 5 m behind the player in third person</td><td>First-person instincts do not transfer</td></tr>
+  <tr><td>9</td><td>Prefab builder updated but never re-run; component missing at runtime</td><td>Rebuild the artefact you changed, not just the scene</td></tr>
+  <tr><td>10</td><td>Placement rebuild left stale evidence bodies in the world</td><td>Clear custody whenever knowledge is cleared</td></tr>
+  <tr><td>11</td><td>Evidence revealed along <code>transform.forward</code> spawned inside walls</td><td>Unrotated objects all share world forward</td></tr>
+  <tr><td>12</td><td><code>NetworkConfig</code> intermittently null after <code>AddComponent</code> in edit mode</td><td>Guarantee it rather than depend on timing</td></tr>
+</table>
+
+<h3>Testing mistakes worth recording</h3>
+<ul>
+  <li><strong>A verdict reported PASS while the pickup never happened</strong> — the condition only
+      checked state that was already true beforehand. Verdicts must require the transition, not the
+      end state.</li>
+  <li><strong>Hard-killing a process is not a disconnect</strong> — it sends nothing, so NGO waits
+      out its ~30 s transport timeout. A graceful leave was needed to test the path. (This is also
+      real production behaviour: a crashed player lingers ~30 s.)</li>
+  <li><strong>Aiming the player is not aiming the camera</strong> — the camera rig keeps its own
+      yaw, so tests had to place the player relative to where the camera actually looked.</li>
+</ul>
+
+<h2>16. Known limitations</h2>
+
+<table>
+  <tr><th>Area</th><th>Limitation</th></tr>
+  <tr><td>Movement</td><td>Owner-authoritative — a modified client could teleport or fly. Fine for prototype.</td></tr>
+  <tr><td>Networking</td><td>Direct IP only. No NAT traversal until the Steam relay. No host migration.</td></tr>
+  <tr><td>Networking</td><td>No client-side prediction; remote players are ~1 tick in the past.</td></tr>
+  <tr><td>Networking</td><td>Client ids are reassigned on reconnect — a returning player is a stranger to the roster.</td></tr>
+  <tr><td>Voice</td><td>No echo cancellation, noise suppression or AGC. Headphones required.</td></tr>
+  <tr><td>Voice</td><td>~128 kbit/s per speaker; Opus would cut that ~8x but needs a native plugin.</td></tr>
+  <tr><td>Voice</td><td>Occlusion is a single ray with no notion of an open door.</td></tr>
+  <tr><td>Roles</td><td>Verified at 4 players; spawn slots handle 6 but are untested.</td></tr>
+  <tr><td>Briefing</td><td>Late join after PreInvestigationReady does not rewind the phase.</td></tr>
+  <tr><td>Archive</td><td><strong>Only 2 Archive-suitable items per case</strong>, so 8 of 10 containers are junk or empty.</td></tr>
+  <tr><td>Evidence</td><td>Discovery is individual; no team sharing. Players must talk. Deliberately undecided.</td></tr>
+  <tr><td>Evidence</td><td>Handoff not implemented — dropping is the transfer mechanism.</td></tr>
+  <tr><td>Evidence</td><td><code>EvidenceId</code> is positional; changing generation order shifts ids.</td></tr>
+  <tr><td>Build</td><td>No .NET SDK on the machine — the engine's 18 tests cannot run and the DLL cannot be rebuilt.</td></tr>
+</table>
+
+<h2>17. How to run and test</h2>
+
+<h3>From the editor</h3>
+<p>Open <code>Assets/Scenes/Courthouse.unity</code>, press Play, click <strong>HOST</strong>.</p>
+
+<h3>Multiplayer</h3>
+<p>Build via <em>Case Closed &gt; Prototype &gt; 4. Build Playground Player</em>, then launch
+<code>game/Build/Prototype/PlayerPrototype.exe</code> two to four times. First window HOST, the rest
+JOIN 127.0.0.1.</p>
+
+<h3>Controls</h3>
+<table class="kv">
+  <tr><td><code>WASD</code> / mouse</td><td>move / look</td></tr>
+  <tr><td><code>Shift</code> / <code>Ctrl</code></td><td>sprint / walk</td></tr>
+  <tr><td><code>Space</code> / <code>R</code></td><td>jump / respawn</td></tr>
+  <tr><td><code>E</code></td><td>interact (hold for searches)</td></tr>
+  <tr><td><code>G</code></td><td>drop carried evidence</td></tr>
+  <tr><td><code>V</code></td><td>push to talk</td></tr>
+  <tr><td><code>M</code> / <code>N</code></td><td>mute / next microphone</td></tr>
+  <tr><td><code>Tab</code></td><td>inspect evidence you know</td></tr>
+  <tr><td><code>F1</code> / <code>F2</code> / <code>F3</code> / <code>F5</code></td><td>movement / case debug / greybox / role</td></tr>
+</table>
+
+<h3>The full loop</h3>
+<ol>
+  <li>HOST, then F2 → <strong>START MATCH</strong> (deals roles, generates case, sends briefings)</li>
+  <li>Each player reads their briefing and presses <strong>READY</strong></li>
+  <li>Walk west to the <strong>ARCHIVE</strong></li>
+  <li>Hold <code>E</code> on containers — most are empty or junk; two hold real evidence</li>
+  <li>On a find, a manila folder appears. Press <code>E</code> to pick it up</li>
+  <li><code>G</code> to drop; another player can take it. <code>Tab</code> still shows what you read</li>
+</ol>
+
+<h2>18. Recommended next steps</h2>
+
+<ol>
+  <li><strong>Evidence Locker and registration</strong> — <code>CARRIED</code> now has somewhere to
+      go, and <code>EvidenceCustody.Registered</code> already has its number reserved.</li>
+  <li><strong>Playtest before expanding the generator.</strong> The 2-items-per-case sparseness is a
+      playtesting question, not a bug to pre-solve.</li>
+  <li><strong>Persistent player identity</strong> — needed before reconnection can work.</li>
+  <li><strong>Server authority on movement</strong> — before anything competitive.</li>
+  <li><strong>Opus voice codec</strong> — before player counts rise.</li>
+  <li><strong>Install the .NET SDK</strong> so the engine's 18 tests can run again.</li>
+</ol>
+
+<p class="muted" style="margin-top:26px; border-top:1px solid #ccc; padding-top:8px;">
+Generated from the full build session. Every measurement quoted was produced by a verification run,
+not estimated. All three audits passing at time of writing: case 41/41, interaction 21/21,
+archive + custody 36/36.</p>
