@@ -27,33 +27,249 @@ namespace CaseClosed.EditorTools
         private static readonly Dictionary<string, Material> _mats = new Dictionary<string, Material>();
         private static Transform _root;
 
+        /// <summary>A wall segment read from the Revit export.</summary>
+        private class Seg
+        {
+            public Bounds B;
+            public bool Exterior;      // 300mm shell vs 140mm partition
+            public int Axis;           // 0 = runs along X (faces +/-Z), 1 = runs along Z
+            public float Lane => Axis == 0 ? B.center.z : B.center.x;
+            public float Min => Axis == 0 ? B.min.x : B.min.z;
+            public float Max => Axis == 0 ? B.max.x : B.max.z;
+            public float Thick => Axis == 0 ? B.size.z : B.size.x;
+        }
+
+        /// <summary>A real opening: a gap Omar left between two wall segments.</summary>
+        private class Opening
+        {
+            public Vector3 Center;     // gap centre in plan, y = wall band centre
+            public float Width;
+            public float Thick;
+            public Vector3 Normal;     // perpendicular to the wall run
+            public bool Exterior;
+            public float BandMin, BandMax;   // vertical extent of the wall run
+        }
+
+        private static readonly List<Opening> _openings = new List<Opening>();
+
         [MenuItem("Case Closed/Dress Map (Architect Pass)")]
         public static void Run()
         {
             var old = GameObject.Find("MapDressing");
             if (old != null) Object.DestroyImmediate(old);
             _mats.Clear();
+            _openings.Clear();
             _root = new GameObject("MapDressing").transform;
 
             var building = GameObject.Find("OmarBuilding");
             if (building == null) { Debug.LogError("[Dressing] OmarBuilding not found"); return; }
-            var rends = building.GetComponentsInChildren<Renderer>();
-            var b = rends[0].bounds;
-            foreach (var r in rends) b.Encapsulate(r.bounds);
             Physics.SyncTransforms();
 
-            int windows = PlaceWindows(b);
-            int doors = 0, kits = 0;
+            // THE RULE THAT KILLS THE RANDOMNESS: nothing is placed freehand.
+            // Doors exist only in the gaps Omar modelled between wall segments;
+            // windows are centred on the real structural bays; furniture faces
+            // the room's actual entrance.
+            var segs = CollectWalls(building);
+            FindOpenings(segs);
+            int doors = 0;
+            foreach (var o in _openings) doors += BuildPortal(o);
+            int windows = 0;
+            foreach (var s in segs.Where(s => s.Exterior)) windows += BuildSegmentWindows(s);
+
+            int kits = 0;
             var anchors = Object.FindObjectsByType<ZoneAnchor>(FindObjectsSortMode.None);
             foreach (var a in anchors)
             {
-                Vector3 doorDir = DoorDirection(a.transform.position);
-                if (PlaceDoor(a, doorDir)) doors++;
+                Vector3 doorDir = TowardNearestOpening(a.transform.position);
                 if (Furnish(a, doorDir)) kits++;
             }
 
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-            Debug.Log($"[Dressing] windows={windows} doors={doors} kits={kits} anchors={anchors.Length}");
+            Debug.Log($"[Dressing] real openings={_openings.Count} portals={doors} bay windows={windows} kits={kits}");
+        }
+
+        private static List<Seg> CollectWalls(GameObject building)
+        {
+            var list = new List<Seg>();
+            foreach (var r in building.GetComponentsInChildren<Renderer>())
+            {
+                bool ext = r.gameObject.name.Contains("300mm");
+                bool inte = r.gameObject.name.Contains("140mm");
+                if (!ext && !inte) continue;
+                list.Add(new Seg
+                {
+                    B = r.bounds,
+                    Exterior = ext,
+                    Axis = r.bounds.size.x >= r.bounds.size.z ? 0 : 1,
+                });
+            }
+            return list;
+        }
+
+        private static void FindOpenings(List<Seg> segs)
+        {
+            var lanes = segs.GroupBy(s => s.Axis + "|" + Mathf.Round(s.Lane / 0.3f) * 0.3f);
+            foreach (var lane in lanes)
+            {
+                var run = lane.OrderBy(s => s.Min).ToList();
+                for (int i = 0; i < run.Count - 1; i++)
+                {
+                    float gap = run[i + 1].Min - run[i].Max;
+                    if (gap < 0.7f || gap > 4.5f) continue;
+                    float mid = (run[i].Max + run[i + 1].Min) * 0.5f;
+                    var s = run[i];
+                    _openings.Add(new Opening
+                    {
+                        Center = s.Axis == 0
+                            ? new Vector3(mid, s.B.center.y, s.Lane)
+                            : new Vector3(s.Lane, s.B.center.y, mid),
+                        Width = gap,
+                        Thick = Mathf.Max(s.Thick, 0.14f),
+                        Normal = s.Axis == 0 ? Vector3.forward : Vector3.right,
+                        Exterior = s.Exterior,
+                        BandMin = Mathf.Min(run[i].B.min.y, run[i + 1].B.min.y),
+                        BandMax = Mathf.Max(run[i].B.max.y, run[i + 1].B.max.y),
+                    });
+                }
+            }
+        }
+
+        private static Vector3 TowardNearestOpening(Vector3 from)
+        {
+            Opening best = null;
+            float bestD = float.MaxValue;
+            foreach (var o in _openings)
+            {
+                // same storey only: compare against the anchor's height band
+                var flat = new Vector3(o.Center.x - from.x, 0f, o.Center.z - from.z);
+                float d = flat.sqrMagnitude;
+                if (d < bestD) { bestD = d; best = o; }
+            }
+            if (best == null) return Vector3.forward;
+            var dir = new Vector3(best.Center.x - from.x, 0f, best.Center.z - from.z);
+            return dir.sqrMagnitude < 0.25f ? Vector3.forward : dir.normalized;
+        }
+
+        /// <summary>
+        /// Build door joinery INSIDE a real gap, one per storey that has floor
+        /// there. Interior 4m gaps become open double-door portals (this is a
+        /// public building - leaves parked open, players walk through); the
+        /// 2.4m entrance bays get glazed courthouse doors.
+        /// </summary>
+        private static int BuildPortal(Opening o)
+        {
+            int built = 0;
+            foreach (float probeY in new[] { 1.0f, 4.6f, 8.6f })
+            {
+                if (!Physics.Raycast(new Vector3(o.Center.x, probeY + 0.8f, o.Center.z),
+                                     Vector3.down, out var floorHit, 3.2f)) continue;
+                if (floorHit.normal.y < 0.6f) continue;
+                float floorY = floorHit.point.y;
+
+                // a doorway only exists where its WALL exists. The building is
+                // pilotis - walls start at 3.4m - so without this check every
+                // gap also spawned a freestanding doorframe in the open garage.
+                if (floorY < o.BandMin - 0.4f || floorY > o.BandMax - 2.3f) continue;
+
+                var p = new GameObject((o.Exterior ? "Entry_" : "Portal_") + built).transform;
+                p.SetParent(_root);
+                p.position = new Vector3(o.Center.x, floorY, o.Center.z);
+                p.rotation = Quaternion.LookRotation(o.Normal);
+                float w = o.Width, t = o.Thick + 0.08f;
+
+                // jambs + header fill the raw structural slot
+                Box(p, "JambL", new Vector3(-w / 2f + 0.09f, 1.3f, 0f), new Vector3(0.18f, 2.6f, t), "WoodDark", true);
+                Box(p, "JambR", new Vector3(w / 2f - 0.09f, 1.3f, 0f), new Vector3(0.18f, 2.6f, t), "WoodDark", true);
+                Box(p, "Header", new Vector3(0f, 2.75f, 0f), new Vector3(w, 0.3f, t), "WoodDark");
+                // transom glazing fills the slot up to the next slab - the tall
+                // Revit gaps read as intentional clerestory, not a hole
+                Box(p, "Transom", new Vector3(0f, 3.35f, 0f), new Vector3(w - 0.1f, 0.9f, 0.06f), "Glass");
+
+                float leafW = (w - 0.36f) / 2f;
+                if (o.Exterior)
+                {
+                    // glazed entrance doors, parked open at 30 degrees
+                    var l = Box(p, "LeafL", Vector3.zero, Vector3.one, "WoodDark");
+                    l.localPosition = new Vector3(-w / 2f + 0.18f, 0f, 0f);
+                    l.localRotation = Quaternion.Euler(0f, -30f, 0f);
+                    Box(l, "LeafLPanel", new Vector3(leafW / 2f, 1.15f, 0f), new Vector3(leafW, 2.3f, 0.07f), "WoodDark");
+                    Box(l, "LeafLGlass", new Vector3(leafW / 2f, 1.35f, 0f), new Vector3(leafW - 0.24f, 1.5f, 0.09f), "Glass");
+                    var rr = Box(p, "LeafR", Vector3.zero, Vector3.one, "WoodDark");
+                    rr.localPosition = new Vector3(w / 2f - 0.18f, 0f, 0f);
+                    rr.localRotation = Quaternion.Euler(0f, 30f, 0f);
+                    Box(rr, "LeafRPanel", new Vector3(-leafW / 2f, 1.15f, 0f), new Vector3(leafW, 2.3f, 0.07f), "WoodDark");
+                    Box(rr, "LeafRGlass", new Vector3(-leafW / 2f, 1.35f, 0f), new Vector3(leafW - 0.24f, 1.5f, 0.09f), "Glass");
+                }
+                else
+                {
+                    // interior portal: double leaves parked fully open inside
+                    var l = Box(p, "LeafL", Vector3.zero, Vector3.one, "Wood");
+                    l.localPosition = new Vector3(-w / 2f + 0.18f, 0f, 0f);
+                    l.localRotation = Quaternion.Euler(0f, -100f, 0f);
+                    Box(l, "LeafLPanel", new Vector3(leafW / 2f, 1.15f, 0f), new Vector3(leafW, 2.3f, 0.06f), "Wood");
+                    var rr = Box(p, "LeafR", Vector3.zero, Vector3.one, "Wood");
+                    rr.localPosition = new Vector3(w / 2f - 0.18f, 0f, 0f);
+                    rr.localRotation = Quaternion.Euler(0f, 100f, 0f);
+                    Box(rr, "LeafRPanel", new Vector3(-leafW / 2f, 1.15f, 0f), new Vector3(leafW, 2.3f, 0.06f), "Wood");
+                }
+
+                // nameplates on BOTH faces (single-faced TextMesh reads mirrored
+                // from behind). Entrances announce the building; interior portals
+                // name the room behind each face.
+                Box(p, "Plate", new Vector3(0f, 3.0f, 0f), new Vector3(2.2f, 0.4f, t + 0.1f), "WoodDark");
+                foreach (int side in new[] { 1, -1 })
+                {
+                    Vector3 face = o.Normal * side;
+                    string label;
+                    if (o.Exterior) label = "DISTRICT COURT";
+                    else
+                    {
+                        // the room this face opens INTO is on the opposite side
+                        var az = Object.FindObjectsByType<ZoneAnchor>(FindObjectsSortMode.None)
+                            .Where(z => Mathf.Abs(z.transform.position.y - floorY) < 1.6f
+                                     && Vector3.Dot(z.transform.position - p.position, face) < 0f)
+                            .OrderBy(z => (z.transform.position - p.position).sqrMagnitude)
+                            .FirstOrDefault();
+                        if (az == null || (az.transform.position - p.position).sqrMagnitude > 144f) continue;
+                        label = Display(az.ZoneName);
+                    }
+                    Sign(p, p.position + face * (t / 2f + 0.08f) + Vector3.up * 3.0f, face, label);
+                }
+                built++;
+            }
+            return built;
+        }
+
+        /// <summary>
+        /// One window per storey per exterior segment, CENTRED on the segment -
+        /// the rhythm follows the real structural bays, so inside and outside
+        /// agree and nothing lands on a corner or clips an edge.
+        /// </summary>
+        private static int BuildSegmentWindows(Seg s)
+        {
+            if (s.Max - s.Min < 2.2f) return 0;
+            int placed = 0;
+            float mid = (s.Min + s.Max) * 0.5f;
+            foreach (float sillBand in new[] { 4.6f, 8.6f })
+            {
+                if (sillBand < s.B.min.y || sillBand > s.B.max.y - 1.2f) continue;
+                Vector3 pos = s.Axis == 0
+                    ? new Vector3(mid, sillBand + 0.6f, s.Lane)
+                    : new Vector3(s.Lane, sillBand + 0.6f, mid);
+                var w = new GameObject("BayWindow").transform;
+                w.SetParent(_root);
+                w.position = pos;
+                w.rotation = Quaternion.LookRotation(s.Axis == 0 ? Vector3.forward : Vector3.right);
+                float ww = Mathf.Min(1.8f, (s.Max - s.Min) - 1.0f);
+                float t = s.Thick + 0.1f;
+                Box(w, "Frame", Vector3.zero, new Vector3(ww + 0.22f, 1.82f, t), "WoodDark");
+                Box(w, "Glass", Vector3.zero, new Vector3(ww, 1.6f, t + 0.06f), "Glass");
+                Box(w, "Mullion", Vector3.zero, new Vector3(0.07f, 1.62f, t + 0.08f), "WoodDark");
+                Box(w, "Transom", Vector3.zero, new Vector3(ww + 0.02f, 0.07f, t + 0.08f), "WoodDark");
+                Box(w, "Sill", new Vector3(0f, -1.0f, 0f), new Vector3(ww + 0.4f, 0.1f, t + 0.3f), "PlasterLight");
+                placed++;
+            }
+            return placed;
         }
 
         // ---------------------------------------------------------------- helpers
@@ -107,81 +323,24 @@ namespace CaseClosed.EditorTools
             tm.characterSize = 0.055f;
             tm.anchor = TextAnchor.MiddleCenter;
             tm.color = new Color(0.92f, 0.90f, 0.82f);
-        }
-
-        // ---------------------------------------------------------------- windows
-        private static int PlaceWindows(Bounds b)
-        {
-            int placed = 0;
-            float[] sillLevels = { 3.6f, 7.6f };   // upper storeys; grade is pilotis
-            foreach (float level in sillLevels)
+            // the default font shader is ZTest Always - text glows through
+            // walls, floors, and the far side of its own plate. Assign the
+            // builtin font EXPLICITLY (a fresh TextMesh reports font == null
+            // while still rendering via fallback) and swap to the depth-tested
+            // 3D text shader so signs behave like objects.
+            var f = tm.font;
+            if (f == null)
             {
-                float y = level + 1.7f;
-                // long facades (normal = +/-Z), then short facades (+/-X)
-                for (float x = b.min.x + 3f; x < b.max.x - 3f; x += 4.5f)
-                {
-                    placed += TryWindow(new Vector3(x, y, b.max.z + 2f), Vector3.back);
-                    placed += TryWindow(new Vector3(x, y, b.min.z - 2f), Vector3.forward);
-                }
-                for (float z = b.min.z + 3f; z < b.max.z - 3f; z += 4.5f)
-                {
-                    placed += TryWindow(new Vector3(b.max.x + 2f, y, z), Vector3.left);
-                    placed += TryWindow(new Vector3(b.min.x - 2f, y, z), Vector3.right);
-                }
+                f = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                tm.font = f;
             }
-            return placed;
-        }
-
-        private static int TryWindow(Vector3 origin, Vector3 dirIn)
-        {
-            // outer face
-            if (!Physics.Raycast(origin, dirIn, out var outer, 6f)) return 0;
-            if (Vector3.Dot(outer.normal, -dirIn) < 0.8f) return 0;          // not a facade plane
-            // inner face: cast back from inside the wall
-            var innerOrigin = outer.point + dirIn * 1.5f;
-            if (!Physics.Raycast(innerOrigin, -dirIn, out var inner, 1.6f)) return 0;
-            float thickness = Vector3.Dot(inner.point - outer.point, dirIn);
-            if (thickness < 0.08f || thickness > 0.9f) return 0;             // opening or double wall
-
-            Vector3 mid = (outer.point + inner.point) * 0.5f;
-            var w = new GameObject("Window").transform;
-            w.SetParent(_root);
-            w.position = mid;
-            w.rotation = Quaternion.LookRotation(dirIn);
-            // frame pokes past both faces; glass sits proud of the frame
-            Box(w, "Frame", Vector3.zero, new Vector3(1.9f, 1.7f, thickness + 0.05f), "WoodDark");
-            Box(w, "Glass", Vector3.zero, new Vector3(1.6f, 1.4f, thickness + 0.12f), "Glass");
-            Box(w, "Mullion", Vector3.zero, new Vector3(0.07f, 1.42f, thickness + 0.14f), "WoodDark");
-            Box(w, "Transom", Vector3.zero, new Vector3(1.62f, 0.07f, thickness + 0.14f), "WoodDark");
-            Box(w, "Sill", new Vector3(0f, -0.92f, 0f), new Vector3(2.05f, 0.09f, thickness + 0.3f), "PlasterLight");
-            return 1;
-        }
-
-        // ---------------------------------------------------------------- doors
-        private static Vector3 DoorDirection(Vector3 anchorPos)
-        {
-            var toCenter = new Vector3(-anchorPos.x, 0f, -anchorPos.z);
-            return toCenter.sqrMagnitude < 0.5f ? Vector3.forward : toCenter.normalized;
-        }
-
-        private static bool PlaceDoor(ZoneAnchor a, Vector3 dir)
-        {
-            var from = a.transform.position + Vector3.up * 1.2f;
-            if (!Physics.Raycast(from, dir, out var hit, 9f)) return false;
-            if (Mathf.Abs(hit.normal.y) > 0.4f) return false;                 // floor/ceiling, not a wall
-
-            var d = new GameObject("Door_" + a.ZoneName).transform;
-            d.SetParent(_root);
-            d.position = new Vector3(hit.point.x, a.transform.position.y, hit.point.z) + hit.normal * 0.02f;
-            d.rotation = Quaternion.LookRotation(hit.normal);
-
-            Box(d, "Frame", new Vector3(0f, 1.15f, 0f), new Vector3(1.45f, 2.35f, 0.10f), "WoodDark");
-            Box(d, "Leaf", new Vector3(0f, 1.1f, 0.045f), new Vector3(1.15f, 2.2f, 0.06f), "Wood");
-            Box(d, "Kick", new Vector3(0f, 0.18f, 0.085f), new Vector3(1.1f, 0.3f, 0.02f), "Metal");
-            Cyl(d, "Knob", new Vector3(0.42f, 1.05f, 0.10f), new Vector3(0.07f, 0.02f, 0.07f), "Gold");
-            Box(d, "Plate", new Vector3(0f, 2.55f, 0.02f), new Vector3(1.7f, 0.34f, 0.05f), "WoodDark");
-            Sign(d, d.position + Vector3.up * 2.55f + hit.normal * 0.09f, hit.normal, Display(a.ZoneName));
-            return true;
+            var shader = Shader.Find("CaseClosed/TextDepth");   // our URP depth-tested text
+            if (f != null && shader != null)
+            {
+                var m = new Material(shader) { mainTexture = f.material.mainTexture };
+                m.SetColor("_Color", Color.white);
+                go.GetComponent<MeshRenderer>().sharedMaterial = m;
+            }
         }
 
         private static string Display(string zone)
@@ -213,9 +372,33 @@ namespace CaseClosed.EditorTools
             // center the kit between the walls, shrink it if the room is tight.
             float back = WallDist(a.transform.position, -doorDir, 6f);
             float fore = WallDist(a.transform.position, doorDir, 6f);
-            k.position = a.transform.position + doorDir * ((fore - back) * 0.5f);
-            float s = Mathf.Clamp((back + fore) / 8.8f, 0.55f, 1f);
+            Vector3 side = Vector3.Cross(Vector3.up, doorDir);
+            float left = WallDist(a.transform.position, -side, 6f);
+            float right = WallDist(a.transform.position, side, 6f);
+            k.position = a.transform.position
+                       + doorDir * ((fore - back) * 0.5f)
+                       + side * ((right - left) * 0.5f);      // centre on BOTH axes
+            float s = Mathf.Clamp(Mathf.Min(back + fore, left + right) / 8.8f, 0.55f, 1f);
             k.localScale = new Vector3(s, Mathf.Max(s, 0.85f), s);
+
+            // no ceiling lamp near this room? hang a bare bulb so the kit isn't
+            // furnishing a black void (rooms between light pools were pitch dark)
+            var lightsRoot = GameObject.Find("ScatteredLights");
+            bool lit = false;
+            if (lightsRoot != null)
+                foreach (Transform lc in lightsRoot.transform)
+                    if (lc.GetComponent<Light>() != null &&
+                        Vector3.Distance(lc.position, k.position) < 6.5f) { lit = true; break; }
+            if (!lit)
+            {
+                var bulb = new GameObject("RoomBulb").AddComponent<Light>();
+                bulb.type = LightType.Point;
+                bulb.range = 9f;
+                bulb.intensity = 1.7f;
+                bulb.color = new Color(1f, 0.9f, 0.72f);
+                bulb.transform.SetParent(k);
+                bulb.transform.position = k.position + Vector3.up * 2.5f;
+            }
 
             switch (a.ZoneName)
             {
