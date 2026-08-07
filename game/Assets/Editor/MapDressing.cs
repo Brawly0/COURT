@@ -51,6 +51,7 @@ namespace CaseClosed.EditorTools
         }
 
         private static readonly List<Opening> _openings = new List<Opening>();
+        private static Bounds? _stairZone;   // inflated stair footprint, keep-clear
 
         [MenuItem("Case Closed/Dress Map (Architect Pass)")]
         public static void Run()
@@ -59,6 +60,7 @@ namespace CaseClosed.EditorTools
             if (old != null) Object.DestroyImmediate(old);
             _mats.Clear();
             _openings.Clear();
+            _placedKits.Clear();
             _root = new GameObject("MapDressing").transform;
 
             var building = GameObject.Find("OmarBuilding");
@@ -69,6 +71,22 @@ namespace CaseClosed.EditorTools
             // Doors exist only in the gaps Omar modelled between wall segments;
             // windows are centred on the real structural bays; furniture faces
             // the room's actual entrance.
+            // stair keep-clear zone from the real stair geometry
+            _stairZone = null;
+            foreach (var r in building.GetComponentsInChildren<Renderer>())
+            {
+                var n = r.gameObject.name;
+                if (!n.Contains("Stair") && !n.Contains("Landing") && !n.Contains("Carriage") && !n.Contains("Run ")) continue;
+                if (_stairZone == null) _stairZone = r.bounds;
+                else { var z = _stairZone.Value; z.Encapsulate(r.bounds); _stairZone = z; }
+            }
+            if (_stairZone.HasValue)
+            {
+                var z = _stairZone.Value;
+                z.Expand(new Vector3(2.4f, 0f, 2.4f));
+                _stairZone = z;
+            }
+
             var segs = CollectWalls(building);
             FindOpenings(segs);
             int doors = 0;
@@ -108,6 +126,7 @@ namespace CaseClosed.EditorTools
 
         private static void FindOpenings(List<Seg> segs)
         {
+            // 1. gaps BETWEEN collinear segments
             var lanes = segs.GroupBy(s => s.Axis + "|" + Mathf.Round(s.Lane / 0.3f) * 0.3f);
             foreach (var lane in lanes)
             {
@@ -130,6 +149,46 @@ namespace CaseClosed.EditorTools
                         BandMin = Mathf.Min(run[i].B.min.y, run[i + 1].B.min.y),
                         BandMax = Mathf.Max(run[i].B.max.y, run[i + 1].B.max.y),
                     });
+                }
+            }
+
+            // 2. gaps at a partition's END - most rooms are entered through the
+            // slot between a wall's end and the next wall, and without this the
+            // upper-floor rooms had entrances with no doors at all
+            foreach (var s in segs.Where(x => !x.Exterior))
+            {
+                foreach (int e in new[] { -1, 1 })
+                {
+                    Vector3 runDir = (s.Axis == 0 ? Vector3.right : Vector3.forward) * e;
+                    Vector3 endPt = s.Axis == 0
+                        ? new Vector3(e > 0 ? s.B.max.x : s.B.min.x, 0f, s.Lane)
+                        : new Vector3(s.Lane, 0f, e > 0 ? s.B.max.z : s.B.min.z);
+
+                    foreach (float probeY in new[] { 4.9f, 8.9f })
+                    {
+                        if (probeY < s.B.min.y || probeY > s.B.max.y) continue;
+                        Vector3 from = new Vector3(endPt.x, probeY, endPt.z) + runDir * 0.06f;
+                        if (!Physics.Raycast(from, runDir, out var hit, 3.0f)) continue;
+                        if (hit.distance < 0.65f || hit.distance > 2.5f) continue;
+
+                        Vector3 c = from + runDir * (hit.distance * 0.5f);
+                        c.y = s.B.center.y;
+                        bool dup = _openings.Any(o =>
+                            Mathf.Abs(o.Center.x - c.x) < 1.0f && Mathf.Abs(o.Center.z - c.z) < 1.0f);
+                        if (dup) break;
+
+                        _openings.Add(new Opening
+                        {
+                            Center = c,
+                            Width = hit.distance + 0.06f,
+                            Thick = Mathf.Max(s.Thick, 0.14f),
+                            Normal = s.Axis == 0 ? Vector3.forward : Vector3.right,
+                            Exterior = false,
+                            BandMin = s.B.min.y,
+                            BandMax = s.B.max.y,
+                        });
+                        break;   // one opening per wall end
+                    }
                 }
             }
         }
@@ -360,6 +419,24 @@ namespace CaseClosed.EditorTools
             return Physics.Raycast(pos + Vector3.up * 1.2f, dir, out var hit, max) ? hit.distance : max;
         }
 
+        private static readonly List<Vector3> _placedKits = new List<Vector3>();
+
+        /// <summary>Indoors (floor below + ceiling above), off the entrances, off the stair.</summary>
+        private static bool KitSpotValid(Vector3 p, float storeyY)
+        {
+            var probe = new Vector3(p.x, storeyY, p.z);
+            if (!Physics.Raycast(probe + Vector3.up * 1.2f, Vector3.down, out var fl, 3.2f)) return false;
+            if (!Physics.Raycast(probe + Vector3.up * 1.6f, Vector3.up, out _, 8f)) return false;
+            foreach (var o in _openings.Where(x => x.Exterior))
+                if (new Vector3(p.x - o.Center.x, 0f, p.z - o.Center.z).magnitude < 4.0f) return false;
+            if (_stairZone.HasValue)
+            {
+                var sb = _stairZone.Value;
+                if (p.x > sb.min.x && p.x < sb.max.x && p.z > sb.min.z && p.z < sb.max.z) return false;
+            }
+            return true;
+        }
+
         private static bool Furnish(ZoneAnchor a, Vector3 doorDir)
         {
             var k = new GameObject("Kit_" + a.ZoneName).transform;
@@ -380,6 +457,56 @@ namespace CaseClosed.EditorTools
                        + side * ((right - left) * 0.5f);      // centre on BOTH axes
             float s = Mathf.Clamp(Mathf.Min(back + fore, left + right) / 8.8f, 0.55f, 1f);
             k.localScale = new Vector3(s, Mathf.Max(s, 0.85f), s);
+
+            // CIRCULATION IS SACRED: no furniture in the entrance bays or the
+            // stair throat (shelf rows were physically blocking the way in)
+            foreach (var o in _openings.Where(o => o.Exterior))
+            {
+                var flat = new Vector3(k.position.x - o.Center.x, 0f, k.position.z - o.Center.z);
+                if (flat.magnitude < 4.0f)
+                    k.position += (flat.sqrMagnitude > 0.01f ? flat.normalized : -o.Normal)
+                                * (4.0f - flat.magnitude);
+            }
+            if (_stairZone.HasValue)
+            {
+                var sb = _stairZone.Value;
+                var p2 = k.position;
+                if (p2.x > sb.min.x && p2.x < sb.max.x && p2.z > sb.min.z && p2.z < sb.max.z)
+                {
+                    // push out through the nearest zone face
+                    float[] exits = { p2.x - sb.min.x, sb.max.x - p2.x, p2.z - sb.min.z, sb.max.z - p2.z };
+                    int m = System.Array.IndexOf(exits, exits.Min());
+                    k.position += m == 0 ? Vector3.left * (exits[0] + 0.8f)
+                               : m == 1 ? Vector3.right * (exits[1] + 0.8f)
+                               : m == 2 ? Vector3.back * (exits[2] + 0.8f)
+                               : Vector3.forward * (exits[3] + 0.8f);
+                }
+            }
+
+            // pushing can shove a lobby kit OUT of the building entirely. If the
+            // fitted spot is invalid, re-home the kit into a real room: just
+            // behind one of the interior doorways on this storey.
+            float storeyY = a.transform.position.y;
+            if (!KitSpotValid(k.position, storeyY))
+            {
+                bool homed = false;
+                foreach (var o in _openings.Where(x => !x.Exterior))
+                {
+                    foreach (int sideSign in new[] { 1, -1 })
+                    {
+                        var cand = new Vector3(o.Center.x, storeyY, o.Center.z)
+                                 + o.Normal * (sideSign * 3.2f);
+                        if (!KitSpotValid(cand, storeyY)) continue;
+                        if (_placedKits.Any(pk => Vector3.Distance(pk, cand) < 3.5f)) continue;
+                        k.position = cand;
+                        homed = true;
+                        break;
+                    }
+                    if (homed) break;
+                }
+                if (!homed) Debug.LogWarning($"[Dressing] no valid room for {a.ZoneName}, kit stays at fitted spot");
+            }
+            _placedKits.Add(k.position);
 
             // no ceiling lamp near this room? hang a bare bulb so the kit isn't
             // furnishing a black void (rooms between light pools were pitch dark)

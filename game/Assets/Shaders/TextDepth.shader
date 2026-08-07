@@ -14,7 +14,9 @@ Shader "CaseClosed/TextDepth"
         Lighting Off
         ZWrite Off
         ZTest LEqual
-        Cull Off
+        // one-sided on purpose: each nameplate face has its own text, and the
+        // backface of the far one read as mirrored ghosting at steep angles
+        Cull Back
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass
