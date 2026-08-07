@@ -59,6 +59,17 @@ namespace CaseClosed.Game.Interaction
 
         public bool IsHold => HoldDuration > 0.01f;
 
+        /// <summary>
+        /// How long THIS client must hold. Defaults to the shared duration.
+        ///
+        /// Exists so an object can be cheaper for a player who has already earned it
+        /// — re-reading a witness statement you already took should not cost the
+        /// full interview again. Kept in the base class rather than special-cased in
+        /// one subclass, so the server clock remains the only clock: the client
+        /// still never says how long it held.
+        /// </summary>
+        public virtual float HoldDurationFor(ulong clientId) => HoldDuration;
+
         /// <summary>Override for objects that go out of service (a door already open, a shelf emptied).</summary>
         public virtual bool IsAvailable => true;
 

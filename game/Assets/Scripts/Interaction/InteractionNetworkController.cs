@@ -310,7 +310,10 @@ namespace CaseClosed.Game.Interaction
                     continue;
                 }
 
-                if (Time.time - hold.StartTime < hold.Target.HoldDuration) continue;
+                // Per-client, so an object can be cheaper for someone who already
+                // earned it. Still the SERVER's clock and the server's opinion of
+                // how long this client owes.
+                if (Time.time - hold.StartTime < hold.Target.HoldDurationFor(hold.ClientId)) continue;
 
                 hold.Target.ServerExecute(hold.ClientId);
                 hold.Target.ServerReleaseLock(hold.ClientId);
@@ -394,7 +397,11 @@ namespace CaseClosed.Game.Interaction
             var target = ResolveTarget(LocalHoldTarget);
             if (target == null || !target.IsHold) return;
 
-            LocalHoldProgress = Mathf.Clamp01(LocalHoldProgress + Time.deltaTime / target.HoldDuration);
+            // Cosmetic only — the bar predicts our own cost so it does not crawl
+            // through a hold the server will finish instantly. The server's clock
+            // still decides; this just avoids the bar disagreeing with the outcome.
+            float cost = Mathf.Max(0.01f, target.HoldDurationFor(NetworkManager.Singleton.LocalClientId));
+            LocalHoldProgress = Mathf.Clamp01(LocalHoldProgress + Time.deltaTime / cost);
         }
     }
 }

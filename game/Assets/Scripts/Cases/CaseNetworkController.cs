@@ -98,6 +98,12 @@ namespace CaseClosed.Game.Cases
 
             ActiveCaseManager.Instance?.Store(truth);
 
+            // Seat the cast in the Witness Lounge. Server-side and takes the truth
+            // directly: identities come from CaseFile.CastNames, so the same seed
+            // always produces the same people. Nothing about them is replicated
+            // beyond a display name.
+            Witnesses.WitnessDirector.Instance?.ServerSeatWitnesses(truth);
+
             // Public briefing goes out to everyone, now and to anyone who joins later.
             _publicInfo.Value = CaseViewFactory.BuildPublicInfo(truth);
             _state.Value = CaseLifecycleState.Loaded;
