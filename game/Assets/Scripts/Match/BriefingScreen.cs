@@ -22,8 +22,10 @@ namespace CaseClosed.Game.Match
     /// </summary>
     public class BriefingScreen : MonoBehaviour
     {
-        [Tooltip("Re-open the briefing after closing it.")]
-        public Key ToggleKey = Key.Tab;
+        [Tooltip("Re-open the briefing after closing it. J, not Tab — Tab already opens " +
+                 "the evidence you know (EvidenceCarryHud.InspectKey), and both panels " +
+                 "were drawing on top of each other.")]
+        public Key ToggleKey = Key.J;
 
         [Tooltip("Freeze the local player while the briefing is open.")]
         public bool BlockMovementUntilReady = true;

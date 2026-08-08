@@ -33,9 +33,32 @@ namespace CaseClosed.Game.Archive
         InWorld = 1,       // lying somewhere, free to pick up
         Carried = 2,       // in a specific player's hands
         InLocker = 3,      // handed in at the Evidence Locker. Terminal.
+        InLabMachine = 4,  // loaded into the forensics machine, mid-analysis
 
         // Reserved, NOT implemented:
-        // Destroyed = 4,
+        // Destroyed = 5,
+    }
+
+    /// <summary>
+    /// Whether the lab has finished with this item. The FOURTH dimension.
+    ///
+    /// WHY NOT EvidenceLegalState.Processed. Registration answers "is this in the
+    /// court record"; processing answers "has the lab finished with it". They are
+    /// independent questions with independent answers: a catering schedule registers
+    /// without ever being processed, and a fingerprint card can finish processing
+    /// and never be registered. Folding them together would make "processed but not
+    /// yet registered" — the normal state of a useful forensic item — impossible to
+    /// express. Same reasoning that gave custody InLocker rather than Registered.
+    ///
+    /// NotRequired is a first-class value, not a null: most evidence is paper, and
+    /// "this item has no lab step" is a real answer rather than a missing one.
+    /// </summary>
+    public enum EvidenceProcessingState : byte
+    {
+        NotRequired = 0,   // paper. There is nothing for the lab to do.
+        Unprocessed = 1,   // forensic, still redacted
+        Processing = 2,    // in the machine, server clock running
+        Processed = 3,     // result available to whoever collects or reviews it
     }
 
     /// <summary>
@@ -73,6 +96,9 @@ namespace CaseClosed.Game.Archive
         Dropped = 2,
         DroppedOnDisconnect = 3,
         Registered = 4,
+        LoadedIntoLab = 5,
+        ProcessingComplete = 6,
+        CollectedFromLab = 7,
     }
 
     /// <summary>
@@ -124,6 +150,19 @@ namespace CaseClosed.Game.Archive
         public ulong CarrierClientId = NoCarrier;
         public UnityEngine.Vector3 WorldPosition;
 
+        // ---- forensic processing ----
+        public EvidenceProcessingState Processing = EvidenceProcessingState.NotRequired;
+
+        /// <summary>Seconds the lab needs, from the generator's FoundAt prose. 0 when not required.</summary>
+        public float ProcessingSeconds;
+
+        /// <summary>Everyone who has legitimately read the forensic result. Never shrinks.</summary>
+        public readonly HashSet<ulong> ResultKnownBy = new();
+
+        public bool RequiresProcessing => Processing != EvidenceProcessingState.NotRequired;
+        public bool IsProcessed => Processing == EvidenceProcessingState.Processed;
+        public bool IsInMachine => Custody == EvidenceCustody.InLabMachine;
+
         // ---- legal status ----
         public EvidenceLegalState LegalState = EvidenceLegalState.Unregistered;
         public ulong RegisteredByClientId = NoCarrier;
@@ -149,7 +188,62 @@ namespace CaseClosed.Game.Archive
         /// </summary>
         public bool IsLockedAway => Custody == EvidenceCustody.InLocker;
 
+        /// <summary>
+        /// The item is inside something — the locker or the lab machine — and cannot
+        /// be materialised into the world by a rebuild, a disconnect or a test
+        /// fixture. Without this, the same document could exist in the machine AND
+        /// on the floor, which is precisely the duplication custody exists to
+        /// prevent.
+        /// </summary>
+        public bool IsEnclosed =>
+            Custody == EvidenceCustody.InLocker || Custody == EvidenceCustody.InLabMachine;
+
         public bool IsKnownBy(ulong clientId) => KnownBy.Contains(clientId);
+
+        /// <summary>
+        /// Into the machine. Leaves the carrier's hands in the same step, so a
+        /// document is never both held and being analysed.
+        /// </summary>
+        public bool TryLoadIntoMachine(ulong clientId)
+        {
+            if (Custody != EvidenceCustody.Carried) return false;
+            if (CarrierClientId != clientId) return false;
+            if (Processing != EvidenceProcessingState.Unprocessed) return false;   // paper, or already done
+
+            Custody = EvidenceCustody.InLabMachine;
+            CarrierClientId = NoCarrier;
+            Processing = EvidenceProcessingState.Processing;
+            return true;
+        }
+
+        /// <summary>SERVER ONLY. The lab clock elapsed.</summary>
+        public bool TryFinishProcessing()
+        {
+            if (Processing != EvidenceProcessingState.Processing) return false;
+            Processing = EvidenceProcessingState.Processed;
+            return true;
+        }
+
+        /// <summary>
+        /// Back out of the machine into a pair of hands. Refused while the analysis
+        /// is still running — the item is physically inside a working machine.
+        /// </summary>
+        public bool TryCollectFromMachine(ulong clientId)
+        {
+            if (Custody != EvidenceCustody.InLabMachine) return false;
+            if (Processing == EvidenceProcessingState.Processing) return false;
+
+            Custody = EvidenceCustody.Carried;
+            CarrierClientId = clientId;
+            GrantKnowledge(clientId);
+            return true;
+        }
+
+        /// <summary>Reading the forensic result. Per-player, and only ever grows.</summary>
+        public bool GrantResultKnowledge(ulong clientId) =>
+            IsProcessed && ResultKnownBy.Add(clientId);
+
+        public bool KnowsResult(ulong clientId) => ResultKnownBy.Contains(clientId);
 
         /// <summary>Appends to the history. The only way events are added.</summary>
         public void Record(CustodyEventType type, ulong clientId, PlayerTeam team,
@@ -227,7 +321,7 @@ namespace CaseClosed.Game.Archive
         /// </summary>
         public bool PlaceInWorld(UnityEngine.Vector3 position)
         {
-            if (IsLockedAway) return false;
+            if (IsEnclosed) return false;
 
             Custody = EvidenceCustody.InWorld;
             CarrierClientId = NoCarrier;
@@ -272,7 +366,7 @@ namespace CaseClosed.Game.Archive
         /// </summary>
         public bool ForceDrop(UnityEngine.Vector3 position)
         {
-            if (IsLockedAway) return false;   // registered evidence never returns to the floor
+            if (IsEnclosed) return false;   // registered evidence never returns to the floor
 
             Custody = EvidenceCustody.InWorld;
             CarrierClientId = NoCarrier;

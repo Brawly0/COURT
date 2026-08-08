@@ -467,6 +467,118 @@ namespace CaseClosed.EditorTools.Archive
                   typeof(NetworkInteractable).IsAssignableFrom(typeof(RegistrationTerminal)),
                   "distance, sight, lock and hold timing inherited, not reinvented");
 
+            // ---- forensics lab: a fourth dimension, kept apart from the other three ----
+
+            Check("processing state is its own field",
+                  typeof(EvidenceInstance).GetField("Processing") != null &&
+                  typeof(EvidenceInstance).GetField("LegalState") != null,
+                  "registration and lab work are different questions");
+
+            Check("processing is not a legal state",
+                  !System.Enum.GetNames(typeof(EvidenceLegalState)).Contains("Processed"),
+                  string.Join(", ", System.Enum.GetNames(typeof(EvidenceLegalState))));
+
+            Check("machine custody is a real location",
+                  System.Enum.GetNames(typeof(EvidenceCustody)).Contains("InLabMachine"),
+                  "exactly one custody value at a time");
+
+            // Behavioural, on the real state machine.
+            EvidenceInstance Sample(bool forensic)
+            {
+                var e = new EvidenceInstance { EvidenceId = "E-LAB" };
+                e.TryMarkFound(1UL, PlayerTeam.None, 0, 1f);
+                e.PlaceInWorld(Vector3.zero);
+                if (forensic) { e.Processing = EvidenceProcessingState.Unprocessed; e.ProcessingSeconds = 90f; }
+                return e;
+            }
+
+            var paper = Sample(false);
+            paper.TryPickUp(1UL);
+            Check("paper cannot enter the machine", !paper.TryLoadIntoMachine(1UL),
+                  "NotRequired means there is nothing for the lab to do");
+
+            var forensic = Sample(true);
+            Check("loose sample cannot be loaded", !forensic.TryLoadIntoMachine(1UL), "must be carried first");
+
+            forensic.TryPickUp(1UL);
+            Check("only the carrier loads it", !forensic.TryLoadIntoMachine(2UL), "client 2 holds nothing");
+            Check("carrier loads it", forensic.TryLoadIntoMachine(1UL),
+                  "custody=" + forensic.Custody + " processing=" + forensic.Processing);
+
+            Check("loading empties the hands",
+                  forensic.Custody == EvidenceCustody.InLabMachine &&
+                  forensic.CarrierClientId == EvidenceInstance.NoCarrier,
+                  "never both held and being analysed");
+
+            Check("cannot be picked up out of the machine", !forensic.TryPickUp(1UL), "reach in and it refuses");
+            Check("cannot be materialised into the world while inside",
+                  !forensic.PlaceInWorld(Vector3.one) && !forensic.ForceDrop(Vector3.one),
+                  "no id in the machine AND on the floor at once");
+            Check("cannot collect mid-run", !forensic.TryCollectFromMachine(1UL), "the analysis is still running");
+            Check("result unknown before completion", !forensic.GrantResultKnowledge(1UL), "nothing to learn yet");
+
+            Check("server completes the run", forensic.TryFinishProcessing(),
+                  "processing=" + forensic.Processing);
+            Check("completion is not repeatable", !forensic.TryFinishProcessing(), "one transition only");
+
+            Check("collecting returns it to a hand", forensic.TryCollectFromMachine(3UL) &&
+                  forensic.Custody == EvidenceCustody.Carried && forensic.CarrierClientId == 3UL,
+                  "custody=" + forensic.Custody);
+
+            Check("result knowledge is per-player",
+                  forensic.GrantResultKnowledge(3UL) && forensic.KnowsResult(3UL) && !forensic.KnowsResult(1UL),
+                  "the collector learns it; teammates do not");
+
+            Check("result knowledge does not duplicate",
+                  !forensic.GrantResultKnowledge(3UL) && forensic.ResultKnownBy.Count == 1,
+                  "readers=" + forensic.ResultKnownBy.Count);
+
+            Check("processed evidence still registers",
+                  forensic.TryRegister(3UL, PlayerTeam.Prosecution, 5f) &&
+                  forensic.LegalState == EvidenceLegalState.Registered &&
+                  forensic.Processing == EvidenceProcessingState.Processed,
+                  "lab work survives registration");
+
+            // ---- compatibility and duration come from the generator, not a hard-coded list ----
+            int labSeen = 0; bool everyLabItemTimed = true, noPaperTimed = true;
+            for (ulong seed = 1; seed <= 30; seed++)
+            {
+                var t = CaseGenerationService.Generate(seed);
+                if (t == null) continue;
+                foreach (var indexed in ArchiveEvidenceIndex.Build(t.File))
+                {
+                    if (indexed.Home == EvidenceHome.Lab)
+                    {
+                        labSeen++;
+                        if (indexed.ProcessingSeconds <= 0f) everyLabItemTimed = false;
+                    }
+                    else if (indexed.ProcessingSeconds > 0f) noPaperTimed = false;
+                }
+            }
+
+            Check("lab compatibility is derived from FoundAt", everyLabItemTimed && labSeen > 0,
+                  labSeen + " lab items across 30 cases, all with a parsed duration");
+            Check("non-lab items carry no duration", noPaperTimed, "no hard-coded evidence ids anywhere");
+
+            // ---- the machine's public state carries no result ----
+            var machineNetVars = typeof(ForensicsMachine).GetFields(flags)
+                .Where(f => typeof(NetworkVariableBase).IsAssignableFrom(f.FieldType))
+                .Select(f => f.Name).ToArray();
+
+            Check("machine replicates no forensic result",
+                  machineNetVars.All(n => n is "_state" or "_label" or "_endsAtServerTime"
+                                            or "_totalSeconds" or "LockOwner"),
+                  "replicated: " + string.Join(", ", machineNetVars));
+
+            Check("the loaded id is server-only",
+                  typeof(ForensicsMachine).GetField("_loadedEvidenceId", flags) != null &&
+                  !machineNetVars.Contains("_loadedEvidenceId"),
+                  "clients see a redacted label, never the id or the answer");
+
+            Check("case reset clears the machine",
+                  typeof(ForensicsMachine).GetMethod("ServerResetMachine") != null,
+                  "no prior-case sample survives a rebuild");
+
             sb.Append('\n').Append(pass ? "ALL CHECKS PASSED" : ">>> FAILURES ABOVE <<<");
             allPassed = pass;
             return sb.ToString();

@@ -23,8 +23,50 @@ namespace CaseClosed.EditorTools.Prototype
 
         public static void BuildWindows() => Build(exitAfter: true);
 
+        /// <summary>
+        /// Stamps the build with a version, the git commit and the time, so two
+        /// players can confirm they are running the same thing before debugging a
+        /// desync that is really a version mismatch.
+        ///
+        /// Written BEFORE BuildPlayer so it is picked up by the asset database and
+        /// included in the player; writing it afterwards would ship the previous
+        /// build's stamp, which is worse than no stamp at all.
+        /// </summary>
+        private static void WriteBuildStamp()
+        {
+            string hash = "nogit";
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git", "rev-parse --short HEAD")
+                {
+                    WorkingDirectory = System.IO.Directory.GetCurrentDirectory(),
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var process = System.Diagnostics.Process.Start(psi);
+                string output = process.StandardOutput.ReadToEnd().Trim();
+                process.WaitForExit(4000);
+                if (!string.IsNullOrEmpty(output)) hash = output;
+            }
+            catch (System.Exception e) { Debug.LogWarning("[Prototype] no git hash: " + e.Message); }
+
+            string stamp = $"v{PlayerSettings.bundleVersion} · {hash} · " +
+                           System.DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+
+            const string folder = "Assets/Resources";
+            if (!System.IO.Directory.Exists(folder)) System.IO.Directory.CreateDirectory(folder);
+
+            System.IO.File.WriteAllText($"{folder}/{CaseClosed.Game.Prototype.Net.BuildStamp.ResourceName}.txt", stamp);
+            AssetDatabase.Refresh();
+
+            Debug.Log($"[Prototype] build stamp: {stamp}");
+        }
+
         private static void Build(bool exitAfter)
         {
+            WriteBuildStamp();
+
             // Windowed and small, so two copies fit on one screen for side-by-side testing.
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
             PlayerSettings.defaultScreenWidth = 960;

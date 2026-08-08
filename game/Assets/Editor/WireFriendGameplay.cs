@@ -31,7 +31,8 @@ namespace CaseClosed.EditorTools
                        "ActiveCaseManager", "CaseNetworkController", "MatchFlowController",
                        "InteractionNetworkController", "ArchiveDirector",
                        "EvidenceCustodyDirector", "EvidenceBodies", "ArchiveContainers",
-                       "RoomVolumes", "RegistrationArea" })
+                       "RoomVolumes", "RegistrationArea", "WitnessNpcs", "WitnessDirector",
+                       "ForensicsArea", "CourtroomCentre" })
             {
                 var go = GameObject.Find(name);
                 if (go != null) Object.DestroyImmediate(go);
@@ -47,6 +48,9 @@ namespace CaseClosed.EditorTools
             BuildSystems();
             BuildArchiveInLocker(lockerKit != null ? lockerKit.transform : null, hall);
             BuildRoomVolumes();
+            BuildWitnesses();
+            BuildForensics();
+            BuildCourtroomMarker();
 
             EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
             Debug.Log("[Wire] friend gameplay wired into CourthouseRVT");
@@ -121,6 +125,9 @@ namespace CaseClosed.EditorTools
             hudGo.AddComponent<CaseClosed.Game.Interaction.InteractionPromptUI>();
             hudGo.AddComponent<CaseClosed.Game.Archive.EvidenceDiscoveryUI>();
             hudGo.AddComponent<CaseClosed.Game.Archive.EvidenceCarryHud>();
+            hudGo.AddComponent<CaseClosed.Game.Witnesses.WitnessStatementHud>();
+            hudGo.AddComponent<CaseClosed.Game.Match.InvestigationHud>();
+            nmGo.AddComponent<NetworkDebugPanel>();
 
             var vault = new GameObject("ActiveCaseManager");
             vault.AddComponent<CaseClosed.Game.Cases.ActiveCaseManager>();
@@ -287,5 +294,120 @@ namespace CaseClosed.EditorTools
             => Physics.Raycast(p + Vector3.up * 1.4f, dir, out var hit, 9f) ? hit.distance : 9f;
 
         private static Bounds Enc(Bounds a, Bounds b) { a.Encapsulate(b); return a; }
+
+        // ------------------------------------------------- witnesses (their lounge, our press room)
+        private static void BuildWitnesses()
+        {
+            var pressKit = GameObject.Find("MapDressing/Kit_PressRoom");
+            var cafeKit = GameObject.Find("MapDressing/Kit_Cafeteria");
+            var home = pressKit != null ? pressKit.transform
+                     : cafeKit != null ? cafeKit.transform : null;
+            Vector3 basePos = home != null ? home.position : new Vector3(0f, 3.6f, 0f);
+            Quaternion rot = home != null ? home.rotation : Quaternion.identity;
+
+            var root = new GameObject("WitnessNpcs").transform;
+            var coats = new[] { "Suit", "Wood", "Metal", "RedAccent", "FlagBlue" };
+            for (int i = 0; i < 5; i++)
+            {
+                Vector3 p = basePos + rot * new Vector3(-2.8f + i * 1.4f, 0f, 2.2f);
+                if (Physics.Raycast(p + Vector3.up * 1.5f, Vector3.down, out var fh, 3f)) p.y = fh.point.y;
+
+                var go = new GameObject($"Witness_{i:00}");
+                go.transform.SetParent(root, false);
+                go.transform.position = p;
+                go.transform.rotation = rot * Quaternion.Euler(0f, 180f, 0f);
+
+                // same blocky figure as their lounge builder, our materials
+                SubBox(go.transform, "Legs", new Vector3(0f, 0.42f, 0f), new Vector3(0.36f, 0.84f, 0.28f), "Plaster");
+                SubBox(go.transform, "Torso", new Vector3(0f, 1.16f, 0f), new Vector3(0.50f, 0.64f, 0.30f), coats[i]);
+                SubBox(go.transform, "Arm_L", new Vector3(-0.31f, 1.14f, 0f), new Vector3(0.11f, 0.58f, 0.13f), coats[i]);
+                SubBox(go.transform, "Arm_R", new Vector3(0.31f, 1.14f, 0f), new Vector3(0.11f, 0.58f, 0.13f), coats[i]);
+                SubBox(go.transform, "Head", new Vector3(0f, 1.63f, 0f), new Vector3(0.30f, 0.30f, 0.28f), "Skin");
+
+                var collider = go.AddComponent<BoxCollider>();
+                collider.center = new Vector3(0f, 0.95f, 0f);
+                collider.size = new Vector3(0.7f, 1.9f, 0.6f);
+                go.AddComponent<NetworkObject>();
+
+                var npc = go.AddComponent<CaseClosed.Game.Witnesses.WitnessNpc>();
+                npc.Prompt = "Interview Witness";
+                npc.HoldDuration = 3f;
+                npc.InterviewSeconds = 3f;
+                npc.ReviewSeconds = 0.15f;
+                npc.MaxDistance = 2.8f;
+                npc.RequiresLineOfSight = true;
+            }
+
+            var dir = new GameObject("WitnessDirector");
+            dir.AddComponent<NetworkObject>();
+            dir.AddComponent<CaseClosed.Game.Witnesses.WitnessDirector>();
+        }
+
+        private static void SubBox(Transform parent, string name, Vector3 pos, Vector3 size, string mat)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = name;
+            Object.DestroyImmediate(go.GetComponent<Collider>());
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localScale = size;
+            go.GetComponent<Renderer>().sharedMaterial = Mat(mat);
+        }
+
+        // ------------------------------------------------- forensics (their lab, our Lab room)
+        private static void BuildForensics()
+        {
+            var labKit = GameObject.Find("MapDressing/Kit_Lab");
+            Vector3 basePos = labKit != null ? labKit.transform.position : new Vector3(-8f, 3.6f, 0f);
+            Quaternion rot = labKit != null ? labKit.transform.rotation : Quaternion.identity;
+            Vector3 fwd = rot * Vector3.forward;
+
+            var root = new GameObject("ForensicsArea").transform;
+
+            // machine body + hood + interactive panel (their exact component setup)
+            Vector3 mPos = basePos - fwd * 2.4f;
+            if (Physics.Raycast(mPos + Vector3.up * 1.5f, Vector3.down, out var mh, 3f)) mPos.y = mh.point.y;
+            Box(root, "MachineBody", mPos + Vector3.up * 0.75f, new Vector3(2.2f, 1.5f, 1.0f), "Metal");
+            Box(root, "MachineHood", mPos + Vector3.up * 1.62f + fwd * 0.1f, new Vector3(2.2f, 0.25f, 0.8f), "PlasterLight");
+            var panel = Box(root, "ForensicsMachine", mPos + Vector3.up * 1.28f - fwd * 0.52f,
+                new Vector3(0.9f, 0.55f, 0.08f), "Screen");
+            GameObjectUtility.SetStaticEditorFlags(panel, 0);
+            panel.isStatic = false;
+            panel.AddComponent<NetworkObject>();
+            var machine = panel.AddComponent<CaseClosed.Game.Archive.ForensicsMachine>();
+            machine.Prompt = "Load Evidence";
+            machine.HoldDuration = 1.5f;
+            machine.MaxDistance = 2.5f;
+            machine.RequiresLineOfSight = true;
+            machine.UseProductionTiming = false;
+            machine.DevelopmentTimeScale = 0.055f;
+
+            // intake bench + the marker custody lays samples on
+            Vector3 iPos = basePos + fwd * 2.4f;
+            if (Physics.Raycast(iPos + Vector3.up * 1.5f, Vector3.down, out var ih, 3f)) iPos.y = ih.point.y;
+            Box(root, "IntakeBench", iPos + Vector3.up * 0.5f, new Vector3(3.0f, 1.0f, 0.8f), "Wood");
+            Box(root, "IntakeStripe", iPos + Vector3.up * 1.02f - fwd * 0.38f, new Vector3(3.0f, 0.05f, 0.03f), "CautionYellow");
+            var intake = new GameObject("IntakePoint").transform;
+            intake.SetParent(root, false);
+            intake.position = iPos + Vector3.up * 1.05f;
+
+            var custody = Object.FindAnyObjectByType<CaseClosed.Game.Archive.EvidenceCustodyDirector>();
+            if (custody != null) { custody.LabIntake = intake; EditorUtility.SetDirty(custody); }
+        }
+
+        // ------------------------------------------------- courtroom seating marker
+        private static void BuildCourtroomMarker()
+        {
+            var courtKit = GameObject.Find("MapDressing/Kit_CourtroomA");
+            var marker = new GameObject("CourtroomCentre");
+            if (courtKit != null)
+            {
+                marker.transform.position = courtKit.transform.position + Vector3.up * 0.3f;
+                marker.transform.rotation = courtKit.transform.rotation;
+                // seats span +-4m in greybox terms; scale to fit our room
+                marker.transform.localScale = Vector3.one * Mathf.Max(0.55f, courtKit.transform.localScale.x);
+            }
+            else marker.transform.position = new Vector3(0f, 3.9f, 0f);
+        }
     }
 }

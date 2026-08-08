@@ -193,8 +193,24 @@ namespace CaseClosed.Game.Interaction
                 case MatchPhase.WaitingForPlayers:
                     return flow.ServerIsReady(clientId);
 
+                // Dealt and ready, but the bell has not rung. Briefly held, so nobody
+                // opens a drawer during the 3-2-1.
                 case MatchPhase.PreInvestigationReady:
+                case MatchPhase.InvestigationCountdown:
+                    return false;
+
+                // The only phase in which the game is actually played.
+                case MatchPhase.Investigation:
                     return true;
+
+                // Time is up. Nothing NEW starts — not a search, not an interview,
+                // not a lab load, not a registration. This single return is what
+                // enforces that for every system at once, which is why none of them
+                // carry their own copy of the rule.
+                case MatchPhase.InvestigationEnding:
+                case MatchPhase.CourtroomTransition:
+                case MatchPhase.CourtroomReady:
+                    return false;
 
                 default:
                     return false;
@@ -202,6 +218,26 @@ namespace CaseClosed.Game.Interaction
 
             // FUTURE GATES (not yet modelled): contempt / holding cell, stunned,
             // hands full, courtroom floor control.
+        }
+
+        /// <summary>
+        /// Drops every hold in flight. Called when the investigation bell rings, so
+        /// nobody completes a search they started at 00:01.
+        ///
+        /// Each target gets its ServerCancel and its lock released, and the holder is
+        /// told — an interaction that simply stopped responding would read as a bug.
+        /// </summary>
+        public void ServerCancelAllHolds()
+        {
+            if (!IsServer) return;
+
+            foreach (var hold in new List<ActiveHold>(_holds.Values))
+            {
+                hold.Target.ServerCancel(hold.ClientId);
+                hold.Target.ServerReleaseLock(hold.ClientId);
+                Respond(hold.ClientId, hold.Target.NetworkObjectId, InteractionOutcome.Cancelled);
+            }
+            _holds.Clear();
         }
 
         private bool PermissionAllows(ulong clientId, NetworkInteractable target)
@@ -310,7 +346,10 @@ namespace CaseClosed.Game.Interaction
                     continue;
                 }
 
-                if (Time.time - hold.StartTime < hold.Target.HoldDuration) continue;
+                // Per-client, so an object can be cheaper for someone who already
+                // earned it. Still the SERVER's clock and the server's opinion of
+                // how long this client owes.
+                if (Time.time - hold.StartTime < hold.Target.HoldDurationFor(hold.ClientId)) continue;
 
                 hold.Target.ServerExecute(hold.ClientId);
                 hold.Target.ServerReleaseLock(hold.ClientId);
@@ -394,7 +433,11 @@ namespace CaseClosed.Game.Interaction
             var target = ResolveTarget(LocalHoldTarget);
             if (target == null || !target.IsHold) return;
 
-            LocalHoldProgress = Mathf.Clamp01(LocalHoldProgress + Time.deltaTime / target.HoldDuration);
+            // Cosmetic only — the bar predicts our own cost so it does not crawl
+            // through a hold the server will finish instantly. The server's clock
+            // still decides; this just avoids the bar disagreeing with the outcome.
+            float cost = Mathf.Max(0.01f, target.HoldDurationFor(NetworkManager.Singleton.LocalClientId));
+            LocalHoldProgress = Mathf.Clamp01(LocalHoldProgress + Time.deltaTime / cost);
         }
     }
 }

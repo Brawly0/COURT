@@ -27,7 +27,7 @@ namespace CaseClosed.Game.Greybox
         [Tooltip("Clears the recorded travel times.")]
         public Key ClearKey = Key.F4;
 
-        public bool Visible = true;
+        public bool Visible = false;
 
         [Tooltip("How many recent journeys to keep on screen.")]
         public int HistoryLength = 6;

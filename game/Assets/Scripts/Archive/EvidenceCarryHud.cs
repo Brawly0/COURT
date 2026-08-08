@@ -33,6 +33,9 @@ namespace CaseClosed.Game.Archive
         /// <summary>Everything this player has legitimately read. Never shrinks.</summary>
         private readonly List<EvidenceDiscovery> _known = new();
 
+        /// <summary>How many items THIS client has read. For cross-process assertions.</summary>
+        public int KnownCount => _known.Count;
+
         private string _banner = "";
         private float _bannerUntil;
 
