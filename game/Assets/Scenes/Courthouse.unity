@@ -4035,6 +4035,11 @@ MonoBehaviour:
   ShowTopMostFoldoutHeaderGroup: 1
   RequiredPlayers: 4
   AllowPartialTable: 1
+  InvestigationDurationSeconds: 900
+  DevelopmentDurationSeconds: 300
+  UseDevelopmentDuration: 1
+  CountdownSeconds: 3
+  CourtroomWalkSeconds: 18
 --- !u!114 &423172649
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9710,6 +9715,7 @@ GameObject:
   - component: {fileID: 855639585}
   - component: {fileID: 855639584}
   - component: {fileID: 855639594}
+  - component: {fileID: 855639595}
   m_Layer: 0
   m_Name: DebugHUD
   m_TagString: Untagged
@@ -9773,7 +9779,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfcdb5a20beec36408c92c655d0bf726, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Match.BriefingScreen
-  ToggleKey: 3
+  ToggleKey: 24
   BlockMovementUntilReady: 1
 --- !u!114 &855639588
 MonoBehaviour:
@@ -9788,7 +9794,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Cases.Roles.PlayerRoleHud
   ToggleKey: 98
-  Visible: 1
+  Visible: 0
   ShowTable: 1
 --- !u!114 &855639589
 MonoBehaviour:
@@ -9803,7 +9809,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Cases.CaseDebugPanel
   ToggleKey: 95
-  Visible: 1
+  Visible: 0
 --- !u!114 &855639590
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9818,7 +9824,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Greybox.GreyboxDebugHud
   ToggleKey: 96
   ClearKey: 97
-  Visible: 1
+  Visible: 0
   HistoryLength: 6
 --- !u!114 &855639591
 MonoBehaviour:
@@ -9849,7 +9855,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Prototype.PlayerDebugHud
   Movement: {fileID: 0}
   AnimatorDriver: {fileID: 0}
-  Visible: 1
+  Visible: 0
   HudToggleKey: 94
 --- !u!4 &855639593
 Transform:
@@ -9881,6 +9887,19 @@ MonoBehaviour:
   CloseKey: 60
   NotebookKey: 16
   DevKey: 100
+--- !u!114 &855639595
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 855639583}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3d2f7b8dde8124840b7a6fed0abc30c8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Match.InvestigationHud
+  NotesKey: 28
 --- !u!1 &868510079
 GameObject:
   m_ObjectHideFlags: 0
@@ -19257,7 +19276,7 @@ MonoBehaviour:
   Distance: 4.5
   ShoulderOffset: 0.6
   Mode: 0
-  ToggleKey: 36
+  ToggleKey: 17
   ModeBlendSeconds: 0.18
   FirstPersonEyeHeight: 1.5
   FirstPersonFov: 75

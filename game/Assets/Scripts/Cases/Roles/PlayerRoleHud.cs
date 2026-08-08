@@ -24,7 +24,7 @@ namespace CaseClosed.Game.Cases.Roles
         public Key ToggleKey = Key.F5;
 
         [Tooltip("Shown from the moment a case is dealt.")]
-        public bool Visible = true;
+        public bool Visible = false;
 
         [Tooltip("Also list everyone else's seat. Roles are public information.")]
         public bool ShowTable = true;

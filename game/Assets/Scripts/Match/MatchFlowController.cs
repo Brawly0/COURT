@@ -196,8 +196,159 @@ namespace CaseClosed.Game.Match
             if (_ready.Count < RequiredCount) return;
 
             _phase.Value = MatchPhase.PreInvestigationReady;
-            Debug.Log("[Match] ALL PLAYERS READY — PreInvestigationReady. " +
-                      "The investigation has NOT started.");
+            Debug.Log("[Match] ALL PLAYERS READY — PreInvestigationReady.");
+
+            ServerBeginCountdown();
+        }
+
+        // ------------------------------------------------------------------
+        // investigation
+        // ------------------------------------------------------------------
+
+        [Header("Investigation")]
+        [Tooltip("Production length of the investigation. 15 minutes.")]
+        public float InvestigationDurationSeconds = 900f;
+
+        [Tooltip("Shorter length for testing.")]
+        public float DevelopmentDurationSeconds = 300f;
+
+        [Tooltip("Use the development length. Turn OFF for production timing.")]
+        public bool UseDevelopmentDuration = true;
+
+        [Tooltip("Seconds of 3-2-1 before the investigation opens.")]
+        public float CountdownSeconds = 3f;
+
+        [Tooltip("Seconds players get to walk to the courtroom before stragglers are moved.")]
+        public float CourtroomWalkSeconds = 18f;
+
+        /// <summary>
+        /// THE AUTHORITATIVE DEADLINE. A timestamp, not a countdown.
+        ///
+        /// Replicating an end time means one write when the phase starts and none
+        /// afterwards — every client derives its own MM:SS from a number that cannot
+        /// drift, and a client that joins late or stalls for two seconds still agrees
+        /// with everyone else. Ticking a replicated integer down once a second would
+        /// be a message per second per player, and each client's display would be a
+        /// slightly different lie.
+        /// </summary>
+        private readonly NetworkVariable<double> _phaseEndsAt = new(
+            0d, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+        /// <summary>How long the current phase was given, so a bar can show a fraction.</summary>
+        private readonly NetworkVariable<float> _phaseTotalSeconds = new(
+            0f, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
+        /// <summary>Server time, shared by construction — NGO synchronises it for us.</summary>
+        private double Now => NetworkManager.Singleton != null
+            ? NetworkManager.Singleton.ServerTime.Time
+            : Time.timeAsDouble;
+
+        /// <summary>Seconds left in whatever the current phase is counting. Never negative.</summary>
+        public float SecondsRemaining =>
+            _phaseEndsAt.Value <= 0d ? 0f : Mathf.Max(0f, (float)(_phaseEndsAt.Value - Now));
+
+        public float PhaseTotalSeconds => _phaseTotalSeconds.Value;
+
+        /// <summary>The one answer to "may investigation interactions run right now".</summary>
+        public bool InvestigationActive => _phase.Value == MatchPhase.Investigation;
+
+        /// <summary>True once time is up, in either post-investigation state.</summary>
+        public bool InvestigationOver =>
+            _phase.Value is MatchPhase.InvestigationEnding
+                        or MatchPhase.CourtroomTransition
+                        or MatchPhase.CourtroomReady;
+
+        private void ServerBeginCountdown()
+        {
+            if (!IsServer) return;
+            ServerSetPhaseClock(MatchPhase.InvestigationCountdown, CountdownSeconds);
+            Debug.Log($"[Match] Countdown — investigation opens in {CountdownSeconds:F0}s.");
+        }
+
+        /// <summary>
+        /// One place that sets a phase and its deadline together, so the two can
+        /// never disagree. Every timed transition goes through here.
+        /// </summary>
+        private void ServerSetPhaseClock(MatchPhase phase, float seconds)
+        {
+            _phase.Value = phase;
+            _phaseTotalSeconds.Value = seconds;
+            _phaseEndsAt.Value = seconds > 0f ? Now + seconds : 0d;
+        }
+
+        /// <summary>
+        /// The server's clock, and the only thing that moves the match forward once
+        /// it is running. Clients have no path to any of these transitions.
+        /// </summary>
+        private void Update()
+        {
+            if (!IsServer) return;
+            if (_phaseEndsAt.Value <= 0d) return;
+            if (Now < _phaseEndsAt.Value) return;
+
+            switch (_phase.Value)
+            {
+                case MatchPhase.InvestigationCountdown:
+                    ServerSetPhaseClock(MatchPhase.Investigation, ActiveDuration);
+                    Debug.Log($"[Match] INVESTIGATE — {ActiveDuration:F0}s on the clock" +
+                              $"{(UseDevelopmentDuration ? " (development timing)" : "")}.");
+                    break;
+
+                case MatchPhase.Investigation:
+                    ServerEndInvestigation();
+                    break;
+
+                case MatchPhase.InvestigationEnding:
+                    ServerSetPhaseClock(MatchPhase.CourtroomTransition, CourtroomWalkSeconds);
+                    Debug.Log($"[Match] Report to the courtroom — {CourtroomWalkSeconds:F0}s.");
+                    break;
+
+                case MatchPhase.CourtroomTransition:
+                    ServerSeatEveryoneInCourt();
+                    break;
+
+                default:
+                    _phaseEndsAt.Value = 0d;   // nothing is being timed
+                    break;
+            }
+        }
+
+        public float ActiveDuration =>
+            UseDevelopmentDuration ? DevelopmentDurationSeconds : InvestigationDurationSeconds;
+
+        /// <summary>
+        /// Time is up.
+        ///
+        /// THE RULE, chosen for consistency and documented rather than implied:
+        /// nothing NEW may start, and anything still being held is cancelled. Lab
+        /// work already running is allowed to finish, because the server started that
+        /// clock and killing it mid-run would make the machine's own state a lie —
+        /// but a finished result can no longer be collected, because collecting is a
+        /// new action. So the lab cannot be used to smuggle work past the bell.
+        /// </summary>
+        private void ServerEndInvestigation()
+        {
+            ServerSetPhaseClock(MatchPhase.InvestigationEnding, 6f);
+
+            // Cancel every hold in flight. Nobody finishes a search on the bell.
+            Interaction.InteractionNetworkController.Instance?.ServerCancelAllHolds();
+
+            SendCaseNotesToEveryone();
+
+            Debug.Log("[Match] INVESTIGATION OVER — new actions refused, holds cancelled.");
+        }
+
+        /// <summary>
+        /// Moves anyone not already in the courtroom, then locks the phase.
+        ///
+        /// The teleport exists so one player standing still cannot hold the match
+        /// hostage — the walk is a courtesy with a deadline, not a requirement.
+        /// </summary>
+        private void ServerSeatEveryoneInCourt()
+        {
+            int moved = CourtroomSeating.ServerSeatAll();
+            ServerSetPhaseClock(MatchPhase.CourtroomReady, 0f);
+            Debug.Log($"[Match] CourtroomReady — {moved} player(s) moved into position.");
         }
 
         // ------------------------------------------------------------------
@@ -260,13 +411,108 @@ namespace CaseClosed.Game.Match
             BriefingChanged?.Invoke();
         }
 
+        // ------------------------------------------------------------------
+        // private case notes
+        // ------------------------------------------------------------------
+
+        /// <summary>The local player's own notes. Empty until the bell.</summary>
+        public CaseNotes LocalNotes { get; private set; } = CaseNotes.Empty;
+        public bool HasNotes { get; private set; }
+        public event System.Action NotesChanged;
+
+        /// <summary>
+        /// SERVER ONLY. Builds one packet per player from the ledgers that already
+        /// exist, and sends each to exactly that player.
+        ///
+        /// Note what it reads: KnownBy, InterviewedBy, RegisteredByClientId. All
+        /// per-player sets the game was already maintaining. Nothing here consults
+        /// the CaseFile, so there is no route by which a note could contain a fact
+        /// its reader had not earned.
+        /// </summary>
+        private void SendCaseNotesToEveryone()
+        {
+            if (!IsServer) return;
+
+            foreach (var clientId in NetworkManager.Singleton.ConnectedClientsIds)
+                ReceiveNotesClientRpc(BuildNotesFor(clientId), new ClientRpcParams
+                {
+                    Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+                });
+        }
+
+        private static CaseNotes BuildNotesFor(ulong clientId)
+        {
+            var evidence = new System.Collections.Generic.List<string>();
+            var registered = new System.Collections.Generic.List<string>();
+            var witnesses = new System.Collections.Generic.List<string>();
+
+            var archive = Archive.ArchiveDirector.Instance;
+            if (archive != null)
+            {
+                foreach (var item in archive.ServerEvidence.Values)
+                {
+                    if (item?.Source == null) continue;
+
+                    // Only what THIS player read, and titled as they last saw it —
+                    // an unprocessed sample still reads as unprocessed in their notes.
+                    if (item.IsKnownBy(clientId))
+                        evidence.Add(item.Source.TitleFor(item.IsProcessed));
+
+                    if (item.IsRegistered && item.RegisteredByClientId == clientId)
+                        registered.Add(item.EvidenceId);
+                }
+            }
+
+            var witnessDirector = Witnesses.WitnessDirector.Instance;
+            if (witnessDirector != null)
+                foreach (var witness in witnessDirector.ServerWitnesses.Values)
+                    if (witness.IsKnownBy(clientId)) witnesses.Add(witness.CharacterId);
+
+            return new CaseNotes
+            {
+                EvidenceLearned = Clip(evidence, "Nothing recorded."),
+                WitnessesInterviewed = Clip(witnesses, "Nobody interviewed."),
+                EvidenceRegistered = Clip(registered, "Nothing registered."),
+                EvidenceCount = evidence.Count,
+                WitnessCount = witnesses.Count,
+                RegisteredCount = registered.Count,
+            };
+        }
+
+        private static Unity.Collections.FixedString512Bytes Clip(
+            System.Collections.Generic.List<string> lines, string empty)
+        {
+            if (lines.Count == 0) return empty;
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var line in lines)
+            {
+                string candidate = sb.Length == 0 ? line : "\n" + line;
+                // Byte budget, not character budget.
+                if (System.Text.Encoding.UTF8.GetByteCount(sb + candidate) > 480) { sb.Append("\n..."); break; }
+                sb.Append(candidate);
+            }
+            return sb.ToString();
+        }
+
+        [ClientRpc]
+        private void ReceiveNotesClientRpc(CaseNotes notes, ClientRpcParams rpcParams = default)
+        {
+            LocalNotes = notes;
+            HasNotes = true;
+            NotesChanged?.Invoke();
+        }
+
         /// <summary>Host-only reset, so a fresh case redeals seats and clears readiness.</summary>
         public void HostReset()
         {
             if (!IsServer) return;
             _ready.Clear();
             _readyCount.Value = 0;
+            _phaseEndsAt.Value = 0d;
+            _phaseTotalSeconds.Value = 0f;
             _phase.Value = MatchPhase.LobbyReady;
+            HasNotes = false;
         }
     }
 }

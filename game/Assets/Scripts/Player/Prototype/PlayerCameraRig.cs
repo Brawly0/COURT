@@ -35,8 +35,10 @@ namespace CaseClosed.Game.Prototype
         [Tooltip("First or third person. Local only — never replicated.")]
         public CameraMode Mode = CameraMode.ThirdPerson;
 
-        [Tooltip("Toggles between first and third person.")]
-        public Key ToggleKey = Key.V;
+        [Tooltip("Toggles between first and third person. C, not V — V is push-to-talk " +
+                 "(VoiceCapture.PushToTalkKey), so binding the camera there flipped the " +
+                 "view every time anyone spoke.")]
+        public Key ToggleKey = Key.C;
 
         [Tooltip("Seconds to travel between the two modes. Small: the switch should " +
                  "read as immediate, just not as a jump cut.")]

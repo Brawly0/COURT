@@ -20,8 +20,10 @@ namespace CaseClosed.Game.Prototype
         [Tooltip("Leave empty and it uses the driver on the same object as Movement.")]
         public PlayerAnimatorDriver AnimatorDriver;
 
-        [Tooltip("Turn the overlay off without removing the component.")]
-        public bool Visible = true;
+        [Tooltip("Turn the overlay off without removing the component. OFF by default: " +
+                 "this is developer telemetry, and it shares the top-left corner with " +
+                 "the investigation HUD a player actually needs.")]
+        public bool Visible = false;
 
         // Renamed from the old KeyCode-typed "ToggleKey" on purpose: scenes saved
         // before the switch stored KeyCode.F1 (282), which is out of range for
@@ -61,8 +63,12 @@ namespace CaseClosed.Game.Prototype
 
             EnsureStyles();
 
-            GUI.Box(new Rect(12, 12, 260, 132), GUIContent.none, _boxStyle);
-            GUILayout.BeginArea(new Rect(24, 22, 240, 116));
+            // Sits BELOW the investigation HUD's top-left panel rather than on top of
+            // it, so turning this on during a match adds information instead of
+            // hiding the role and the clock.
+            const float top = 282f;
+            GUI.Box(new Rect(12, top, 260, 132), GUIContent.none, _boxStyle);
+            GUILayout.BeginArea(new Rect(24, top + 10f, 240, 116));
 
             GUILayout.Label($"Speed:            {Movement.CurrentSpeed:0.00} m/s", _style);
             GUILayout.Label($"Grounded:         {Movement.IsGrounded}", _style);

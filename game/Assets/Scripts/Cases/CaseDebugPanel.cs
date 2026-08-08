@@ -23,7 +23,7 @@ namespace CaseClosed.Game.Cases
         public Key ToggleKey = Key.F2;
 
         [Tooltip("Start with the panel open.")]
-        public bool Visible = true;
+        public bool Visible = false;
 
         private string _seedText = "1";
         private Vector2 _scroll;
@@ -47,8 +47,11 @@ namespace CaseClosed.Game.Cases
             EnsureStyles();
 
             var controller = CaseNetworkController.Instance;
-            float w = 560f, h = Screen.height - 24f;
-            var area = new Rect(12f, 12f, w, h);
+            // Offset right of the investigation HUD's 300px column, so the dev panel
+            // and the player's own role/clock can be read at the same time.
+            float w = Mathf.Min(560f, Screen.width - 340f);
+            float h = Screen.height - 24f;
+            var area = new Rect(328f, 12f, w, h);
 
             GUI.DrawTexture(area, _panel);
             GUILayout.BeginArea(new Rect(area.x + 12f, area.y + 10f, area.width - 24f, area.height - 20f));
