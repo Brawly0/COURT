@@ -173,6 +173,18 @@ namespace CaseClosed.Game.Archive
             transform.position = position;
         }
 
+        /// <summary>
+        /// Inside the machine: invisible and non-solid, but still assigned. Distinct
+        /// from ServerRelease, which returns the body to the pool — this item still
+        /// exists and is coming back out.
+        /// </summary>
+        public void ServerStow()
+        {
+            if (!IsServer) return;
+            _custody.Value = EvidenceCustody.InLabMachine;
+            _carrier.Value = EvidenceInstance.NoCarrier;
+        }
+
         public void ServerRelease()
         {
             if (!IsServer) return;
@@ -263,7 +275,13 @@ namespace CaseClosed.Game.Archive
         /// </summary>
         private void ApplyVisibility()
         {
-            bool visible = InUse && _custody.Value != EvidenceCustody.InContainer;
+            // Filed away, locked away, or inside the machine: all invisible, and none
+            // of them pickable. Custody being single-valued is what lets one test
+            // cover every "not out here" case.
+            bool visible = InUse &&
+                           _custody.Value != EvidenceCustody.InContainer &&
+                           _custody.Value != EvidenceCustody.InLocker &&
+                           _custody.Value != EvidenceCustody.InLabMachine;
 
             if (_renderers != null)
                 foreach (var renderer in _renderers) if (renderer != null) renderer.enabled = visible;

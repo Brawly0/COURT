@@ -116,6 +116,11 @@ namespace CaseClosed.Game.Archive
 
             foreach (var body in FindPool()) body.ServerRelease();
             _bodies.Clear();
+
+            // The machine holds a body AND an id. Clearing bodies without clearing
+            // the machine would leave last case's sample "inside" it, holding an id
+            // that has just been recycled — the stale-body bug wearing a lab coat.
+            ServerResetLab();
         }
 
         // ------------------------------------------------------------------
@@ -250,6 +255,123 @@ namespace CaseClosed.Game.Archive
             // 3. Nothing underneath the forward point — a ledge, a gap, the void.
             //    Their own feet are known-good floor.
             return feet + Vector3.up * DropHeight;
+        }
+
+        // ------------------------------------------------------------------
+        // forensics lab
+        // ------------------------------------------------------------------
+
+        [Header("Lab")]
+        [Tooltip("Where forensic samples appear. The generator files them in the Lab " +
+                 "tray, so they start here rather than being carried in.")]
+        public Transform LabIntake;
+
+        /// <summary>
+        /// SERVER ONLY. Marks which items the lab must handle and puts them on the
+        /// intake bench.
+        ///
+        /// Compatibility is DERIVED from the generator's own FoundAt string via
+        /// ArchiveEvidenceIndex — "Lab tray (processing: 90s)" — so no evidence id is
+        /// ever hard-coded and a generator change flows straight through.
+        /// </summary>
+        public void ServerPrepareLab()
+        {
+            if (!IsServer) return;
+
+            var director = ArchiveDirector.Instance;
+            if (director == null || LabIntake == null) return;
+
+            int prepared = 0;
+            foreach (var instance in director.ServerEvidence.Values)
+            {
+                if (instance?.Source == null) continue;
+                if (!instance.Source.RequiresProcessing) continue;
+
+                instance.Processing = EvidenceProcessingState.Unprocessed;
+                instance.ProcessingSeconds = instance.Source.ProcessingSeconds;
+
+                // Discovered by being in the lab at all: the sample is sitting in the
+                // tray in plain sight. What it SAYS is still redacted until processed.
+                instance.TryMarkFound(0UL, PlayerTeam.None, -1, Time.time);
+
+                Vector3 spot = LabIntake.position + LabIntake.right * (prepared * 0.55f - 0.3f);
+                instance.PlaceInWorld(spot);
+                ServerRevealEvidence(instance.EvidenceId, spot);
+                prepared++;
+            }
+
+            Debug.Log($"[Lab] Prepared {prepared} forensic sample(s) on the intake bench.");
+        }
+
+        /// <summary>The redacted label for the machine display. Never the result.</summary>
+        public string RedactedTitleOf(string evidenceId)
+        {
+            var instance = FindInstance(evidenceId);
+            return instance?.Source?.TitleFor(instance.IsProcessed) ?? "sample";
+        }
+
+        public bool ServerLoadIntoMachine(ulong clientId, EvidenceInstance instance, Vector3 machinePosition)
+        {
+            if (!IsServer || instance == null) return false;
+            if (!instance.TryLoadIntoMachine(clientId)) return false;
+
+            // The physical body leaves the world: it is inside the machine now, so it
+            // must not be pickable and must not be drawn at anyone's carry socket.
+            if (_bodies.TryGetValue(instance.EvidenceId, out var body))
+                body.ServerStow();
+
+            instance.Record(CustodyEventType.LoadedIntoLab, clientId, TeamOf(clientId),
+                            Time.time, machinePosition);
+
+            NotifyCarry(clientId, instance.Source.Title, false);   // clears the carry HUD
+            return true;
+        }
+
+        public void ServerFinishProcessing(string evidenceId, Vector3 machinePosition)
+        {
+            if (!IsServer) return;
+            var instance = FindInstance(evidenceId);
+            if (instance == null || !instance.TryFinishProcessing()) return;
+
+            instance.Record(CustodyEventType.ProcessingComplete, EvidenceInstance.NoCarrier,
+                            PlayerTeam.None, Time.time, machinePosition);
+
+            // NOTE: no ClientRpc here. Completion is public via the machine's own
+            // replicated state; the RESULT stays put until somebody collects it.
+        }
+
+        /// <summary>
+        /// Takes the finished sample back out, and grants the forensic result to the
+        /// collector ALONE. Teammates learn nothing automatically — if you want them
+        /// to know whose prints are on it, tell them.
+        /// </summary>
+        public bool ServerCollectFromMachine(ulong clientId, string evidenceId, Vector3 machinePosition)
+        {
+            if (!IsServer) return false;
+
+            var instance = FindInstance(evidenceId);
+            if (instance == null) return false;
+            if (CountCarried(clientId) >= CarryLimit) { Notify(clientId, "Your hands are full."); return false; }
+            if (!instance.TryCollectFromMachine(clientId)) return false;
+
+            if (_bodies.TryGetValue(instance.EvidenceId, out var body))
+                body.ServerSetCarried(clientId);
+
+            instance.Record(CustodyEventType.CollectedFromLab, clientId, TeamOf(clientId),
+                            Time.time, machinePosition);
+
+            instance.GrantResultKnowledge(clientId);
+            SendKnowledge(clientId, instance);          // now un-redacted, to one client
+            NotifyCarry(clientId, instance.Source.Title, true);
+            return true;
+        }
+
+        /// <summary>Empties every machine. Called whenever placement is rebuilt.</summary>
+        public void ServerResetLab()
+        {
+            if (!IsServer) return;
+            foreach (var machine in Object.FindObjectsByType<ForensicsMachine>(FindObjectsInactive.Exclude))
+                machine.ServerResetMachine();
         }
 
         // ------------------------------------------------------------------
@@ -416,12 +538,18 @@ namespace CaseClosed.Game.Archive
 
         private void SendKnowledge(ulong clientId, EvidenceInstance instance)
         {
+            // REDACTED UNTIL PROCESSED. The generator puts the forensic answer in the
+            // item's own name — "Fingerprint card: Nadia, Officer Dowd" — so sending
+            // the real title to someone who has only picked the sample up would hand
+            // over the lab result for free.
             var packet = new EvidenceDiscovery
             {
                 EvidenceId = instance.EvidenceId,
-                Title = Clip128(instance.Source.Title),
-                Kind = Clip64("Document"),
-                Description = Clip512(instance.Source.Contents),
+                Title = Clip128(instance.Source.TitleFor(instance.IsProcessed)),
+                Kind = Clip64(instance.Source.RequiresProcessing ? "Forensic sample" : "Document"),
+                Description = Clip512(instance.Source.RequiresProcessing && !instance.IsProcessed
+                    ? "Not yet analysed. The forensics lab can process this."
+                    : instance.Source.Contents),
                 ContainerIndex = instance.FoundInContainer,
             };
 

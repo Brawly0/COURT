@@ -29,7 +29,28 @@ namespace CaseClosed.Game.Archive
         public string GeneratorHome;   // EvidenceItem.FoundAt, verbatim
         public EvidenceHome Home;
 
+        /// <summary>Lab seconds parsed from FoundAt. 0 when the item needs no processing.</summary>
+        public float ProcessingSeconds;
+
+        /// <summary>
+        /// What the item is called BEFORE the lab has finished with it.
+        ///
+        /// The generator puts the forensic answer in the item's own Name —
+        /// "Fingerprint card: Greg the Janitor, Nadia" — so showing the real name to
+        /// someone who has not processed it would hand over the result for free.
+        /// This is a redaction of data the player has not earned, exactly like the
+        /// existing knowledge gate; it invents nothing.
+        /// </summary>
+        public string RedactedTitle;
+
         public bool BelongsInArchive => Home == EvidenceHome.Archive;
+
+        /// <summary>Only the generator's Lab-tray items carry a processing time.</summary>
+        public bool RequiresProcessing => Home == EvidenceHome.Lab && ProcessingSeconds > 0f;
+
+        /// <summary>What to call it, given whether the lab has finished.</summary>
+        public string TitleFor(bool processed) =>
+            !RequiresProcessing || processed ? Title : RedactedTitle;
     }
 
     /// <summary>
@@ -69,6 +90,8 @@ namespace CaseClosed.Game.Archive
                     Contents = item.GmContents ?? "",
                     GeneratorHome = item.FoundAt ?? "",
                     Home = Classify(item.FoundAt),
+                    ProcessingSeconds = ParseProcessingSeconds(item.FoundAt),
+                    RedactedTitle = Redact(item.Name),
                 });
             }
 
@@ -94,6 +117,55 @@ namespace CaseClosed.Game.Archive
             if (text.Contains("impound")) return EvidenceHome.Impound;
 
             return EvidenceHome.Unknown;
+        }
+
+        /// <summary>
+        /// Reads "Lab tray (processing: 90s)" and returns 90.
+        ///
+        /// THE ONE PLACE THIS PROSE IS PARSED. The generator stores the duration as
+        /// human-readable text inside FoundAt rather than as a field, so somebody has
+        /// to interpret it — but exactly once. Scattering "does this string contain
+        /// 90s" through the lab, the HUD and the audit would mean three readers that
+        /// can disagree, and a generator wording change would break them one at a time.
+        ///
+        /// Returns 0 when there is no processing clause, which is what makes
+        /// "requires processing" a derived fact rather than a hard-coded id list.
+        /// </summary>
+        public static float ParseProcessingSeconds(string foundAt)
+        {
+            if (string.IsNullOrEmpty(foundAt)) return 0f;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                foundAt, @"processing\s*:\s*(\d+(?:\.\d+)?)\s*s",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (!match.Success) return 0f;
+            return float.TryParse(match.Groups[1].Value,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float seconds)
+                ? seconds : 0f;
+        }
+
+        /// <summary>
+        /// Strips the forensic answer out of the item's name, keeping the kind.
+        /// "Fingerprint card: Greg, Nadia" -> "Fingerprint card (unprocessed)".
+        /// Names without a colon are already generic and pass through.
+        /// </summary>
+        public static string Redact(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "(unidentified sample)";
+
+            int colon = name.IndexOf(':');
+            string kind = colon > 0 ? name.Substring(0, colon).Trim() : name.Trim();
+            return $"{kind} (unprocessed)";
+        }
+
+        /// <summary>Only the items the generator itself files in the Lab.</summary>
+        public static List<IndexedEvidence> LabItems(CaseFile file)
+        {
+            var lab = new List<IndexedEvidence>();
+            foreach (var item in Build(file)) if (item.RequiresProcessing) lab.Add(item);
+            return lab;
         }
 
         /// <summary>Only the items the generator itself files in the Archive.</summary>

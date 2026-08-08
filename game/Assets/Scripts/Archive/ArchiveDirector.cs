@@ -97,8 +97,15 @@ namespace CaseClosed.Game.Archive
                          truth.File, containers.Count, PlacementSalt, JunkFraction))
                 _placement[pair.Key] = pair.Value;
 
-            // Runtime state for every Archive-suitable item, whether or not it fit.
-            foreach (var item in ArchiveEvidenceIndex.ArchiveItems(truth.File))
+            // Runtime state for EVERY generated item, not only the Archive-suitable
+            // ones. Placement above is an Archive concept — which drawer holds what —
+            // but an item's knowledge, custody, legal and processing state belong to
+            // the case, not to the room it happens to live in.
+            //
+            // This was Archive-scoped until the Lab arrived, at which point forensic
+            // samples had nowhere to exist: the generator files them at "Lab tray",
+            // so they were never Archive-suitable and never got a record at all.
+            foreach (var item in ArchiveEvidenceIndex.Build(truth.File))
                 _evidence[item.EvidenceId] = new EvidenceInstance { EvidenceId = item.EvidenceId, Source = item };
 
             foreach (var container in containers) container.ServerResetState();
