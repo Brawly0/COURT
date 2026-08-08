@@ -9716,6 +9716,7 @@ GameObject:
   - component: {fileID: 855639584}
   - component: {fileID: 855639594}
   - component: {fileID: 855639595}
+  - component: {fileID: 855639596}
   m_Layer: 0
   m_Name: DebugHUD
   m_TagString: Untagged
@@ -9900,6 +9901,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Match.InvestigationHud
   NotesKey: 28
+--- !u!114 &855639596
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 855639583}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b09caef1ce2236f4fbd285a1b7d81506, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CaseClosed.Game.Prototype.Net.NetworkDebugPanel
+  ToggleKey: 101
+  Visible: 0
 --- !u!1 &868510079
 GameObject:
   m_ObjectHideFlags: 0
@@ -16392,6 +16407,7 @@ MonoBehaviour:
   Address: 127.0.0.1
   Port: 7777
   OfflinePlayerPrefab: {fileID: 2215208945586700513, guid: d18f6e7186777f9418d3a2f7ee109654, type: 3}
+  ConnectTimeoutSeconds: 10
 --- !u!114 &1440969394
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16417,7 +16433,7 @@ MonoBehaviour:
     Address: 127.0.0.1
     Port: 7777
     WebSocketPath: 
-    ServerListenAddress: 127.0.0.1
+    ServerListenAddress: 0.0.0.0
     ClientBindPort: 0
   DebugSimulator:
     PacketDelayMS: 0

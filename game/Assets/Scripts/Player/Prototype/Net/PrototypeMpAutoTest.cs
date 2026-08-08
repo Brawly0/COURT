@@ -73,6 +73,21 @@ namespace CaseClosed.Game.Prototype.Net
                 float.TryParse(args[leaveIndex + 1], out float leaveAt))
                 _leaveAfter = leaveAt;
 
+            // -runseconds <n> lets a longer scenario play out: the investigation now
+            // has a countdown, a clock and a courtroom transition after it, none of
+            // which fit in the 24 s this harness originally needed.
+            int runIndex = Array.IndexOf(args, "-runseconds");
+            if (runIndex >= 0 && runIndex + 1 < args.Length &&
+                float.TryParse(args[runIndex + 1], out float runFor))
+                _runSeconds = runFor;
+
+            // -investigation <n> shortens the phase itself, so a whole match fits in
+            // a test run without touching the production default.
+            int invIndex = Array.IndexOf(args, "-investigation");
+            if (invIndex >= 0 && invIndex + 1 < args.Length &&
+                float.TryParse(args[invIndex + 1], out float invFor))
+                _investigationSeconds = invFor;
+
             int caseIndex = Array.IndexOf(args, "-caseseed");
             if (caseIndex >= 0 && caseIndex + 1 < args.Length &&
                 ulong.TryParse(args[caseIndex + 1], out ulong parsedSeed))
@@ -145,6 +160,13 @@ namespace CaseClosed.Game.Prototype.Net
                 var flow = CaseClosed.Game.Match.MatchFlowController.Instance;
                 if (flow != null && flow.IsSpawned)
                 {
+                    if (_investigationSeconds > 0f)
+                    {
+                        flow.UseDevelopmentDuration = true;
+                        flow.DevelopmentDurationSeconds = _investigationSeconds;
+                        flow.CourtroomWalkSeconds = 5f;
+                    }
+
                     // The whole sequence: roles, case, briefings, then wait on Ready.
                     flow.HostStartMatch(_caseSeed);
                     _caseRequested = true;
@@ -180,7 +202,117 @@ namespace CaseClosed.Game.Prototype.Net
                 Debug.Log($"[MPPROTO] phase {phase}");
             }
 
-            if (_t > 24f) Application.Quit();
+            DriveInvestigation(elapsed);
+
+            if (_t > _runSeconds) Application.Quit();
+        }
+
+        /// <summary>
+        /// The host performs world actions through the SERVER entry points, and both
+        /// instances report what they locally know.
+        ///
+        /// WHY SERVER-SIDE RATHER THAN SYNTHETIC AIMING: walking 40 m and landing a
+        /// crosshair on a drawer inside a scripted window is a test of the test. The
+        /// interesting question across two processes is not "can a robot aim" but
+        /// "does what the host learned stay off the client" — and that is answered by
+        /// driving the real custody/knowledge path on one machine and reading the
+        /// other machine's own view of it.
+        /// </summary>
+        private void DriveInvestigation(float elapsed)
+        {
+            var flow = CaseClosed.Game.Match.MatchFlowController.Instance;
+            if (flow == null || !flow.IsSpawned) return;
+            if (_mode != "host") return;
+            if (flow.Phase != CaseClosed.Game.Match.MatchPhase.Investigation) return;
+
+            // One search, one pickup, one interview — enough to make the client's
+            // knowledge provably different from the host's.
+            if (!_didSearch && elapsed > 12f)
+            {
+                _didSearch = true;
+                var archive = CaseClosed.Game.Archive.ArchiveDirector.Instance;
+                if (archive != null)
+                {
+                    foreach (var container in FindObjectsByType<CaseClosed.Game.Archive.ArchiveContainer>())
+                        archive.ServerResolveSearch(container, NetworkManager.Singleton.LocalClientId);
+                    Debug.Log("[MPDRIVE] host searched every Archive container");
+                }
+            }
+
+            if (!_didPickup && elapsed > 14f)
+            {
+                _didPickup = true;
+                var custody = CaseClosed.Game.Archive.EvidenceCustodyDirector.Instance;
+                var body = FindObjectsByType<CaseClosed.Game.Archive.PhysicalEvidence>()
+                    .FirstOrDefault(b => b.InUse && b.IsAvailable);
+                if (custody != null && body != null)
+                {
+                    // Stand next to it so the server's own distance check passes.
+                    var me = NetworkManager.Singleton.LocalClient.PlayerObject;
+                    var cc = me.GetComponent<CharacterController>();
+                    bool had = cc != null && cc.enabled;
+                    if (had) cc.enabled = false;
+                    me.transform.position = body.transform.position + new Vector3(0f, -0.9f, -1.0f);
+                    if (had) cc.enabled = true;
+
+                    custody.ServerRequestPickup(body, NetworkManager.Singleton.LocalClientId);
+                    Debug.Log($"[MPDRIVE] host picked up {body.EvidenceId}");
+                }
+            }
+
+            if (!_didInterview && elapsed > 16f)
+            {
+                _didInterview = true;
+                var witnesses = CaseClosed.Game.Witnesses.WitnessDirector.Instance;
+                var npc = FindObjectsByType<CaseClosed.Game.Witnesses.WitnessNpc>()
+                    .FirstOrDefault(n => n.Assigned);
+                if (witnesses != null && npc != null)
+                {
+                    witnesses.ServerCompleteInterview(npc.DisplayName, NetworkManager.Singleton.LocalClientId);
+                    Debug.Log($"[MPDRIVE] host interviewed {npc.DisplayName}");
+                }
+            }
+        }
+
+        private bool _didSearch, _didPickup, _didInterview;
+        private float _runSeconds = 24f;
+        private float _investigationSeconds = -1f;
+
+        /// <summary>
+        /// What THIS process knows and sees. Comparing the two logs is the whole
+        /// point: the same line printed by host and client must agree about public
+        /// facts (phase, clock, who is carrying what) and must NOT agree about
+        /// private ones (which documents and statements each has read).
+        /// </summary>
+        private void ReportInvestigation()
+        {
+            string who = _mode == "host" ? "HOST  " : "CLIENT";
+
+            var flow = CaseClosed.Game.Match.MatchFlowController.Instance;
+            if (flow != null && flow.IsSpawned)
+                Debug.Log($"[MPPHASE] {who} phase={flow.Phase} " +
+                          $"remaining={flow.SecondsRemaining:F1} total={flow.PhaseTotalSeconds:F0} " +
+                          $"investigationActive={flow.InvestigationActive}");
+
+            // PRIVATE knowledge, as this machine holds it.
+            var carryHud = FindAnyObjectByType<CaseClosed.Game.Archive.EvidenceCarryHud>();
+            int evidenceKnown = carryHud != null ? carryHud.KnownCount : -1;
+            int witnessKnown = CaseClosed.Game.Witnesses.WitnessDirector.KnownStatements.Count;
+
+            Debug.Log($"[MPKNOW] {who} evidenceKnownLocally={evidenceKnown} " +
+                      $"witnessStatementsLocally={witnessKnown} " +
+                      $"carrying={(CaseClosed.Game.Archive.EvidenceCustodyDirector.Instance?.LocalIsCarrying ?? false)}");
+
+            // PUBLIC: every machine should agree about who holds which folder.
+            foreach (var body in FindObjectsByType<CaseClosed.Game.Archive.PhysicalEvidence>())
+            {
+                if (!body.InUse) continue;
+                var renderer = body.GetComponent<Renderer>();
+                Debug.Log($"[MPCARRY] {who} id={body.EvidenceId} custody={body.Custody} " +
+                          $"carrier={body.CarrierClientId} " +
+                          $"drawnAt=({body.transform.position.x:F2},{body.transform.position.y:F2},{body.transform.position.z:F2}) " +
+                          $"visible={(renderer != null && renderer.enabled)}");
+            }
         }
 
         /// <summary>
@@ -242,6 +374,7 @@ namespace CaseClosed.Game.Prototype.Net
         private void Report()
         {
             ReportCase();
+            ReportInvestigation();
 
             foreach (var player in FindObjectsByType<PrototypeNetPlayer>())
             {
